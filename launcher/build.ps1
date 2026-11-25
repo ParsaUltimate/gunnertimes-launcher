@@ -1,5 +1,5 @@
 param(
-    [string]$Channel = "$PSScriptRoot/../../gunnertimes-releases/channel.json",
+    [string]$Channel = "$PSScriptRoot/resources/gunnertimes-channel.json",
     [string]$Libraries = "$env:APPDATA/.minecraft/libraries"
 )
 $ErrorActionPreference = 'Stop'
@@ -23,7 +23,7 @@ try {
     Pop-Location
 }
 & "$jdk/bin/jar.exe" --create --file "$inputFiles/GunnertimesLauncher.jar" --main-class GunnertimesLauncher -C $classes.FullName .
-& "$jdk/bin/jpackage.exe" --type app-image --name 'Gunnertimes' --app-version '1.1.0' `
+& "$jdk/bin/jpackage.exe" --type app-image --name 'Gunnertimes' --app-version '1.2.0' `
     --input $inputFiles.FullName --main-jar GunnertimesLauncher.jar --dest $stage.FullName `
     --add-modules ALL-MODULE-PATH --jlink-options '--strip-debug --no-man-pages --no-header-files'
 $archive = Join-Path $stage 'Gunnertimes-Windows-x64.zip'

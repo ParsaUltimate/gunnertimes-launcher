@@ -20,7 +20,7 @@ public final class Updater {
     record Entry(String path, String sha512, String url, String modId) {}
     record Pack(int schema, String version, List<Entry> files) {}
     record Config(String manifest, String publicKey) {}
-    record Change(Path target, Path staged, Path backup) {}
+    record Change(Path target, Path staged, Path backup, String originalHash) {}
 
     public static void main(String[] args) {
         try {
@@ -394,6 +394,11 @@ public final class Updater {
 
     static void installObserved(Path profile, Config config, Pack pack, boolean installUpdater,
             ProgressSink progress) throws Exception {
+        installObserved(profile, config, pack, installUpdater, progress, null, Map.of());
+    }
+
+    static void installObserved(Path profile, Config config, Pack pack, boolean installUpdater,
+            ProgressSink progress, String signedRelease, Map<String, String> repairHashes) throws Exception {
         Files.createDirectories(profile);
         Path root = profile.toRealPath();
         Path state = root.resolve(STATE);
@@ -402,12 +407,12 @@ public final class Updater {
         try (var channel = FileChannel.open(state.resolve("install.lock"), StandardOpenOption.CREATE,
                 StandardOpenOption.WRITE); var lock = channel.tryLock()) {
             if (lock == null) throw new IOException("Another installation is running.");
-            apply(root, state, config, pack, installUpdater, progress);
+            apply(root, state, config, pack, installUpdater, progress, signedRelease, repairHashes);
         }
     }
 
     static void apply(Path root, Path state, Config config, Pack pack, boolean installUpdater,
-            ProgressSink progress) throws Exception {
+            ProgressSink progress, String signedRelease, Map<String, String> repairHashes) throws Exception {
         Path previous = state.resolve("installed.json");
         Pack old = Files.exists(previous) ? JSON.fromJson(Files.readString(previous), Pack.class)
             : new Pack(1, "", List.of());
@@ -461,32 +466,45 @@ public final class Updater {
                 continue;
             }
             Entry prior = managed.get(entry.path);
-            if (exists && (prior == null || !hash(target).equals(prior.sha512)))
-                throw new IOException("Local file conflict: " + entry.path);
+            String currentHash = exists ? hash(target) : null;
+            if (exists) {
+                boolean approvedRepair = prior != null && prior.sha512.equals(entry.sha512)
+                    && currentHash.equals(repairHashes.get(entry.path));
+                if (prior == null || !currentHash.equals(prior.sha512) && !approvedRepair)
+                    throw new IOException("Local file conflict: " + entry.path);
+            }
             Path staged = transaction.resolve("new-" + changes.size());
             progress.report(Progress.count(Step.CHECK, "pack", entry.path, ++checked, pack.files.size()));
             Files.copy(cache(root, config, entry, progress), staged);
             if (!hash(staged).equals(entry.sha512) || jar && entry.modId != null &&
                 !entry.modId.equals(modId(staged))) throw new IOException("Verification failed: " + entry.path);
-            changes.add(new Change(target, staged, exists ? transaction.resolve("old-" + changes.size()) : null));
+            changes.add(new Change(target, staged, exists ? transaction.resolve("old-" + changes.size()) : null, currentHash));
             owned.add(entry);
         }
         for (Entry entry : old.files) {
             if (seen.contains(entry.path.toLowerCase(Locale.ROOT))) continue;
             Path target = destination(root, entry.path);
             if (Files.exists(target) && hash(target).equals(entry.sha512))
-                changes.add(new Change(target, null, transaction.resolve("old-" + changes.size())));
+                changes.add(new Change(target, null, transaction.resolve("old-" + changes.size()), entry.sha512));
         }
         Path updater = destination(root, "mods/Gunnertimes-Updater.jar");
         if (installUpdater && !Files.exists(updater) && !manual.containsKey("gunnertimes_updater")) {
             Path self = Path.of(Updater.class.getProtectionDomain().getCodeSource().getLocation().toURI());
             if (Files.isRegularFile(self)) {
                 Path staged = Files.copy(self, transaction.resolve("updater.jar"));
-                changes.add(new Change(updater, staged, null));
+                changes.add(new Change(updater, staged, null, null));
             }
         }
         stageMetadata(changes, transaction, previous, JSON.toJson(new Pack(1, pack.version, owned)));
         stageMetadata(changes, transaction, state.resolve("channel.json"), JSON.toJson(config));
+        if (signedRelease != null)
+            stageMetadata(changes, transaction, state.resolve("signed-release.json"), signedRelease);
+        for (Change change : changes) {
+            boolean exists = Files.exists(change.target, LinkOption.NOFOLLOW_LINKS);
+            if (exists != (change.backup != null) || exists && change.originalHash != null &&
+                    (Files.isSymbolicLink(change.target) || !hash(change.target).equals(change.originalHash)))
+                throw new IOException("Local file changed during preparation: " + change.target.getFileName());
+        }
         List<Change> completed = new ArrayList<>();
         long toApply = changes.stream().filter(change -> !change.target.startsWith(state)).count();
         long applied = 0;
@@ -525,11 +543,14 @@ public final class Updater {
     }
 
     static void stageMetadata(List<Change> changes, Path transaction, Path target, String content)
-            throws IOException {
+            throws Exception {
+        if (Files.isSymbolicLink(target) || Files.exists(target) && !target.toRealPath().equals(target))
+            throw new IOException("Linked metadata file: " + target);
         if (Files.isRegularFile(target) && Files.readString(target).equals(content)) return;
         Path staged = Files.writeString(transaction.resolve("new-" + changes.size()), content);
-        changes.add(new Change(target, staged, Files.exists(target)
-            ? transaction.resolve("old-" + changes.size()) : null));
+        boolean exists = Files.exists(target);
+        changes.add(new Change(target, staged, exists
+            ? transaction.resolve("old-" + changes.size()) : null, exists ? hash(target) : null));
     }
 }
 

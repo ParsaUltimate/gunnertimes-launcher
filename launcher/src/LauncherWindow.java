@@ -7,17 +7,20 @@ import java.io.IOException;
 import java.nio.file.*;
 import java.text.NumberFormat;
 import java.util.EnumMap;
+import java.util.Map;
+import java.awt.event.ComponentAdapter;
+import java.awt.event.ComponentEvent;
 import java.util.concurrent.ExecutionException;
 import javax.imageio.ImageIO;
 import javax.swing.*;
 import javax.swing.border.EmptyBorder;
 
 final class LauncherWindow {
-    private static final Color BG = new Color(0x11151B), RAIL = new Color(0x151A21),
-        PANEL = new Color(0x1B222B), EDGE = new Color(0x303A46), TEXT = new Color(0xF5F1E8),
-        MUTED = new Color(0xAAB7C5), GOLD = new Color(0xF9BA68), GREEN = new Color(0x90D5AF),
+    static final Color BG = new Color(0x101114), RAIL = new Color(0x17181B),
+        PANEL = new Color(0x1C1D21), EDGE = new Color(0x34363D), TEXT = new Color(0xF2EFEA),
+        MUTED = new Color(0xAAB0BA), GOLD = new Color(0xFFB23E), GREEN = new Color(0x90D5AF),
         RED = new Color(0xFFABA0);
-    private enum Page { PLAY, SETTINGS, HELP }
+    private enum Page { PLAY, PACK, SETTINGS, HELP }
 
     private final JFrame frame = new JFrame("Gunnertimes");
     private final BufferedImage art = loadArt();
@@ -27,9 +30,20 @@ final class LauncherWindow {
     private Page page = Page.PLAY;
     private boolean busy, expanded, noticeError;
     private String notice = "", noticeDetails = "";
-    private JTextField username, folder, memory;
-    private JButton primary, openLog;
-    private JLabel noticeLabel, status, release, counts, stats, file, active, estimate;
+    private LauncherSettings settingsPanel;
+    private LauncherSettings.Draft draft;
+    private boolean compact;
+    private boolean checking, catalogReady, serverChecking = true;
+    private boolean progressed, minimized;
+    private GunnertimesLauncher.Action lastAction;
+    private PackService.Release installed;
+    private PackService.Check catalog = PackService.Check.empty();
+    private PackService.Inspection inspection;
+    private ServerStatus.Result server = ServerStatus.Result.unknown();
+    private String catalogError = "", profileError = "", search = "";
+    private JButton primary, openLog, retry;
+    private JLabel status, release, counts, stats, file, active, estimate, joinStatus;
+    private JScrollPane pageScroll;
     private JProgressBar transfer;
     private JTextArea details;
     private JPanel detailPanel;
@@ -45,74 +59,88 @@ final class LauncherWindow {
         frame.addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent event) { if (!busy) frame.dispose(); }
         });
-        frame.setMinimumSize(new Dimension(870, 630));
-        frame.setSize(1130, 800);
+        frame.setMinimumSize(new Dimension(690, 550));
+        frame.setSize(1270, 805);
+        frame.addComponentListener(new ComponentAdapter() {
+            @Override public void componentResized(ComponentEvent event) {
+                boolean next = frame.getWidth() < 1020;
+                if (next != compact) {
+                    compact = next;
+                    render();
+                } else if (page == Page.PLAY && pageScroll != null) pageScroll.revalidate();
+            }
+        });
         frame.setLocationRelativeTo(null);
         render();
         frame.setVisible(true);
+        lookup(true);
+        probeServer();
         var timer = new Timer(650, event -> {
             if (!frame.isDisplayable()) ((Timer) event.getSource()).stop();
-            else if (page == Page.PLAY && busy) refresh();
+            else if (busy) {
+                if (!minimized && settings.options().launchWindow().equals("minimize") && session.isRunning()) {
+                    frame.setState(Frame.ICONIFIED);
+                    minimized = true;
+                }
+                if (page == Page.PLAY) refresh();
+            }
         });
         timer.start();
     }
 
     private void render() {
+        if (settingsPanel != null) draft = settingsPanel.draft();
+        settingsPanel = null;
         var shell = panel(new BorderLayout(), BG);
-        shell.add(navigation(), BorderLayout.LINE_START);
-        var main = panel(new BorderLayout(), BG);
-        var head = panel(new BorderLayout(), BG);
-        head.setBorder(new EmptyBorder(15, 26, 14, 26));
-        head.add(label(t(pageKey(page)), 19, true, TEXT), BorderLayout.LINE_START);
-        var language = button(t("switchLanguage"), false);
-        language.addActionListener(event -> changeLanguage(text.rtl ? "en" : "fa"));
-        head.add(language, BorderLayout.LINE_END);
-        main.add(head, BorderLayout.PAGE_START);
+        shell.add(navigation(), BorderLayout.PAGE_START);
         var content = new PageViewport();
         content.setBackground(BG);
-        content.setBorder(new EmptyBorder(0, 26, 24, 26));
+        content.setBorder(page == Page.PLAY ? new EmptyBorder(0, 0, 0, 0) : new EmptyBorder(22, 28, 24, 28));
         content.add(switch (page) {
             case PLAY -> playPage();
+            case PACK -> packPage();
             case SETTINGS -> settingsPage();
             case HELP -> helpPage();
         }, BorderLayout.PAGE_START);
-        JScrollPane scroll = scroll(content);
-        scroll.getVerticalScrollBar().setUnitIncrement(20);
-        main.add(scroll, BorderLayout.CENTER);
-        shell.add(main, BorderLayout.CENTER);
+        pageScroll = scroll(content);
+        pageScroll.getVerticalScrollBar().setUnitIncrement(20);
+        shell.add(pageScroll, BorderLayout.CENTER);
+        if (page == Page.PLAY) shell.add(packStrip(), BorderLayout.PAGE_END);
         text.orient(shell);
         frame.setContentPane(shell);
         frame.getRootPane().setDefaultButton(page == Page.PLAY ? primary : null);
         frame.revalidate();
         frame.repaint();
-        if (page == Page.PLAY) refresh();
+        if (page == Page.PLAY && progressed) refresh();
     }
 
     private static String pageKey(Page page) {
         return switch (page) {
-            case PLAY -> "navPlay";
+            case PLAY -> "navHome";
+            case PACK -> "navPack";
             case SETTINGS -> "navSettings";
             case HELP -> "navHelp";
         };
     }
 
     private JPanel navigation() {
-        var rail = panel(new BorderLayout(), RAIL);
-        rail.setBorder(new EmptyBorder(24, 16, 20, 16));
-        rail.setPreferredSize(new Dimension(181, 0));
-        var items = stack(RAIL, 7);
-        var brand = panel(new FlowLayout(FlowLayout.LEADING, 7, 0), RAIL);
-        brand.add(label("G", 22, true, GOLD));
-        brand.add(label("GUNNERTIMES", 14, true, TEXT));
-        items.add(brand);
-        items.add(Box.createVerticalStrut(18));
+        var bar = panel(new BorderLayout(14, 0), RAIL);
+        bar.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createMatteBorder(0, 0, 1, 0, EDGE),
+            new EmptyBorder(10, 18, 10, 18)));
+        var brand = panel(new BorderLayout(9, 0), RAIL);
+        var mark = label("", 20, true, GOLD);
+        mark.setIcon(navigationIcon(Page.PACK));
+        brand.add(mark, BorderLayout.LINE_START);
+        brand.add(label("Gunnertimes", compact ? 19 : 24, true, TEXT), BorderLayout.CENTER);
+        bar.add(brand, BorderLayout.LINE_START);
+        var tabs = panel(new FlowLayout(FlowLayout.CENTER, compact ? 2 : 8, 0), RAIL);
         for (Page target : Page.values()) {
             var action = button(t(pageKey(target)), false);
-            action.setIcon(navigationIcon(target));
-            action.setIconTextGap(10);
-            action.setHorizontalAlignment(SwingConstants.LEADING);
-            action.setBackground(page == target ? new Color(0x32313A) : RAIL);
-            action.setForeground(page == target ? GOLD : MUTED);
+            if (!compact) action.setIcon(navigationIcon(target));
+            action.setIconTextGap(7);
+            action.setBackground(page == target ? new Color(0x47311C) : RAIL);
+            action.setForeground(page == target ? GOLD : TEXT);
+            action.getAccessibleContext().setAccessibleDescription(page == target ? t("selectedPage") : "");
             action.addActionListener(event -> {
                 if (page != target) {
                     page = target;
@@ -121,39 +149,222 @@ final class LauncherWindow {
                     render();
                 }
             });
-            items.add(action);
+            tabs.add(action);
         }
-        rail.add(items, BorderLayout.PAGE_START);
-        return rail;
+        bar.add(tabs, BorderLayout.CENTER);
+        var language = button(t("switchLanguage"), false);
+        language.addActionListener(event -> changeLanguage(text.rtl ? "en" : "fa"));
+        bar.add(language, BorderLayout.LINE_END);
+        return bar;
     }
 
     private JPanel playPage() {
-        var body = stack(BG, 16);
+        var body = stack(BG, 0);
+        var split = panel(new GridBagLayout(), BG);
+        int height = compact ? 425 : Math.max(470, frame.getHeight() - 157);
         var hero = new Hero(art, text.rtl);
         hero.setLayout(new BorderLayout());
-        hero.setBorder(new EmptyBorder(24, 24, 20, 24));
-        hero.setPreferredSize(new Dimension(680, 280));
-        var headline = stack(null, 3);
-        headline.add(label("Gunnertimes", 49, true, TEXT));
-        headline.add(label(t("heroSubtitle"), 15, true, TEXT));
-        hero.add(headline, BorderLayout.PAGE_START);
-        var actions = panel(new BorderLayout(15, 0), null);
-        primary = button(t("play"), true);
-        primary.setIcon(navigationIcon(Page.PLAY));
-        primary.setIconTextGap(8);
-        primary.setPreferredSize(new Dimension(164, 48));
-        primary.addActionListener(event -> start());
-        actions.add(primary, BorderLayout.LINE_START);
-        var identity = stack(null, 3);
-        identity.add(label(settings.username().isEmpty() ? t("noName") : settings.username(), 15, true, TEXT));
-        var path = label(t("profile") + "   " + ltr(settings.profile()), 12, false, TEXT);
-        path.setPreferredSize(new Dimension(150, 18));
+        hero.setBorder(new EmptyBorder(25, 22, 23, 22));
+        hero.setPreferredSize(new Dimension(compact ? 540 : 618, height));
+        var profile = stack(null, 4);
+        profile.add(label(settings.username().isBlank() ? t("noName") : settings.username(), 16, true, TEXT));
+        var path = label(ltr(settings.profile()), 12, false, TEXT);
+        path.setPreferredSize(new Dimension(160, 18));
         path.setToolTipText(settings.profile());
-        identity.add(path);
-        actions.add(identity, BorderLayout.CENTER);
+        profile.add(path);
+        hero.add(profile, BorderLayout.PAGE_START);
+
+        var actions = panel(new GridBagLayout(), null);
+        var action = mainAction();
+        primary = button(t(actionKey(action)), true);
+        primary.setIcon(navigationIcon(Page.PLAY));
+        primary.setFont(font(compact ? 17 : 23, true));
+        primary.setEnabled(catalogReady && !busy && profileError.isEmpty() &&
+            (installed != null || catalog.available() != null));
+        primary.addActionListener(event -> perform(action));
+        var join = button(t("joinServer"), false);
+        join.putClientProperty("outlined", true);
+        join.setFont(font(compact ? 13 : 15, true));
+        join.setEnabled(!busy && installed != null && (inspection == null || inspection.healthy())
+            && compatibility() != ServerStatus.Compatibility.INCOMPATIBLE);
+        join.setToolTipText(t("compat." + compatibility().name()));
+        join.addActionListener(event -> perform(GunnertimesLauncher.Action.JOIN));
+        var update = button(t("updatePack"), false);
+        update.putClientProperty("outlined", true);
+        update.setFont(font(compact ? 13 : 15, true));
+        update.setEnabled(!busy && canUpdate());
+        update.setToolTipText(t(canUpdate() ? "updatePack" : "noUpdate"));
+        update.addActionListener(event -> perform(GunnertimesLauncher.Action.UPDATE));
+        addAction(actions, primary, 0, .38);
+        addAction(actions, join, 1, .40);
+        addAction(actions, update, 2, .22);
         hero.add(actions, BorderLayout.PAGE_END);
-        body.add(hero);
-        body.add(progressPanel());
+
+        var editorial = new Editorial(text.rtl);
+        editorial.setLayout(new BorderLayout());
+        editorial.setPreferredSize(new Dimension(compact ? 540 : 420, compact ? 305 : height));
+        editorial.setBorder(new EmptyBorder(compact ? 23 : 48, 32, 27, 32));
+        var copy = stack(null, 13);
+        copy.add(label(t("releaseNews"), 13, true, GOLD));
+        String headline = catalog.available() == null ? t(checking ? "checkingRelease" : "releaseUnavailable")
+            : ltr(catalog.available().version());
+        var releaseTitle = label(headline, compact ? 23 : 29, true, TEXT);
+        releaseTitle.setToolTipText(headline);
+        releaseTitle.setPreferredSize(new Dimension(200, compact ? 29 : 37));
+        copy.add(releaseTitle);
+        String news = catalog.notes().isBlank()
+            ? t(catalog.notesStale() ? "notesUnavailable" : "noReleaseNotes") : catalog.notes();
+        var newsText = wrapped(news);
+        newsText.setOpaque(false);
+        newsText.setRows(compact ? 2 : 4);
+        var newsScroll = scroll(newsText);
+        newsScroll.setOpaque(false);
+        newsScroll.getViewport().setOpaque(false);
+        newsScroll.setPreferredSize(new Dimension(220, compact ? 48 : 92));
+        copy.add(newsScroll);
+        if (catalog.notesStale() && !catalog.notes().isBlank()) copy.add(label(t("staleNews"), 12, false, GOLD));
+        var line = new JSeparator();
+        line.setForeground(EDGE);
+        copy.add(line);
+        copy.add(label(t("serverStatus"), 13, true, GOLD));
+        boolean online = server.state() == ServerStatus.State.ONLINE;
+        String state = t(serverChecking ? "serverChecking" : online ? "serverOnline" : "serverUnknown");
+        if (online && server.players() != null) state += "   ·   " + number(server.players()) + " " + t("players");
+        copy.add(label(state, 20, true, online ? GREEN : TEXT));
+        copy.add(label(ltr(ServerStatus.ADDRESS), 12, false, MUTED));
+        if (compatibility() == ServerStatus.Compatibility.INCOMPATIBLE)
+            copy.add(label(t("compat.INCOMPATIBLE"), 13, true, RED));
+        editorial.add(copy, BorderLayout.PAGE_START);
+
+        addSplit(split, hero, 0, 0, compact ? 1 : .60, height);
+        addSplit(split, editorial, compact ? 0 : 1, compact ? 1 : 0, compact ? 1 : .40,
+            compact ? 305 : height);
+        split.setPreferredSize(new Dimension(700, height + (compact ? 305 : 0)));
+        body.add(split);
+        if (progressed) {
+            var progress = panel(new BorderLayout(), BG);
+            progress.setBorder(new EmptyBorder(14, 22, 14, 22));
+            progress.add(progressPanel(), BorderLayout.CENTER);
+            body.add(progress);
+        }
+        return body;
+    }
+
+    private static void addSplit(JPanel target, Component child, int x, int y, double weight, int height) {
+        var constraints = new GridBagConstraints();
+        constraints.gridx = x;
+        constraints.gridy = y;
+        constraints.weightx = weight;
+        constraints.weighty = height;
+        constraints.fill = GridBagConstraints.BOTH;
+        target.add(child, constraints);
+    }
+
+    private static void addAction(JPanel target, JButton button, int x, double weight) {
+        var constraints = new GridBagConstraints();
+        constraints.gridx = x;
+        constraints.weightx = weight;
+        constraints.fill = GridBagConstraints.HORIZONTAL;
+        constraints.ipadx = 0;
+        constraints.ipady = 13;
+        constraints.insets = new Insets(0, x == 0 ? 0 : 7, 0, 0);
+        target.add(button, constraints);
+    }
+
+    private JPanel packStrip() {
+        var strip = panel(new BorderLayout(14, 0), RAIL);
+        strip.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, EDGE),
+            new EmptyBorder(12, 22, 12, 22)));
+        var summary = panel(new FlowLayout(FlowLayout.LEADING, 15, 2), RAIL);
+        var caption = label(t("packStrip"), 14, true, TEXT);
+        caption.setIcon(navigationIcon(Page.PACK));
+        caption.setIconTextGap(8);
+        summary.add(caption);
+        summary.add(label(t("installedVersion") + "  " + ltr(installed == null ? t("none") : installed.version()),
+            13, false, MUTED));
+        summary.add(label(t("availableVersion") + "  " + ltr(catalog.available() == null
+            ? t("unknown") : catalog.available().version()) + (catalog.available() != null && catalog.stale()
+            ? " · " + t("cached") : ""), 13, false, GOLD));
+        strip.add(summary, BorderLayout.CENTER);
+        if (!profileError.isEmpty()) {
+            var error = button(t("details"), false);
+            error.addActionListener(event -> detailDialog(t("failure.CHECK"), profileError));
+            strip.add(error, BorderLayout.LINE_END);
+        }
+        return strip;
+    }
+
+    private JPanel packPage() {
+        var body = stack(BG, 13);
+        body.add(label(t("navPack"), 26, true, TEXT));
+        if (!profileError.isEmpty()) {
+            var error = button(t("details"), false);
+            error.addActionListener(event -> detailDialog(t("failure.CHECK"), profileError));
+            body.add(error);
+        }
+        var commands = panel(new FlowLayout(FlowLayout.LEADING, 7, 0), BG);
+        var verify = button(t("verifyPack"), false);
+        verify.setEnabled(installed != null && !busy && !checking);
+        verify.addActionListener(event -> verify());
+        commands.add(verify);
+        var repair = button(t("repairPack"), false);
+        repair.setEnabled(installed != null && inspection != null && !inspection.healthy() && !busy);
+        repair.addActionListener(event -> perform(GunnertimesLauncher.Action.REPAIR));
+        commands.add(repair);
+        var check = button(t("checkNow"), false);
+        check.setEnabled(!checking);
+        check.addActionListener(event -> lookup(true));
+        commands.add(check);
+        body.add(commands);
+        if (inspection != null) body.add(label(inspection.healthy() ? t("verifiedPack") : t("issuesFound"),
+            14, true, inspection.healthy() ? GREEN : GOLD));
+        var release = installed != null ? installed : catalog.available();
+        if (release == null) {
+            body.add(wrapped(t(checking ? "checkingRelease" : "releaseUnavailable")));
+            return body;
+        }
+        body.add(label(ltr(release.version()), 14, false, GOLD));
+        var searchField = field(search, 25);
+        body.add(labeled(t("searchMods"), searchField, searchField));
+        var model = new javax.swing.table.DefaultTableModel(new Object[]{t("file"), t("modId"), t("fileStatus")}, 0) {
+            @Override public boolean isCellEditable(int row, int column) { return false; }
+        };
+        var table = new JTable(model);
+        table.setBackground(PANEL);
+        table.setForeground(TEXT);
+        table.setGridColor(EDGE);
+        table.setSelectionBackground(new Color(0x5B411F));
+        table.setSelectionForeground(TEXT);
+        table.setRowHeight(27);
+        table.setFont(font(13, false));
+        table.getTableHeader().setBackground(RAIL);
+        table.getTableHeader().setForeground(TEXT);
+        table.getTableHeader().setReorderingAllowed(false);
+        table.getColumnModel().getColumn(0).setPreferredWidth(440);
+        table.getColumnModel().getColumn(1).setPreferredWidth(165);
+        table.getColumnModel().getColumn(2).setPreferredWidth(150);
+        for (var entry : release.pack().files()) {
+            if (!entry.path().startsWith("mods/")) continue;
+            var item = inspection == null ? null : inspection.items().stream()
+                .filter(candidate -> candidate.entry().path().equals(entry.path())).findFirst().orElse(null);
+            model.addRow(new Object[]{ltr(entry.path().substring(5)), ltr(entry.modId() == null ? "" : entry.modId()),
+                item == null ? t("unknown") : t("condition." + item.condition().name())});
+        }
+        var sorter = new javax.swing.table.TableRowSorter<>(model);
+        table.setRowSorter(sorter);
+        Runnable filter = () -> {
+            search = searchField.getText();
+            sorter.setRowFilter(javax.swing.RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(search), 0, 1));
+        };
+        searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
+            public void insertUpdate(javax.swing.event.DocumentEvent event) { filter.run(); }
+            public void removeUpdate(javax.swing.event.DocumentEvent event) { filter.run(); }
+            public void changedUpdate(javax.swing.event.DocumentEvent event) { filter.run(); }
+        });
+        filter.run();
+        var list = scroll(table);
+        list.setPreferredSize(new Dimension(500, 380));
+        body.add(list);
         return body;
     }
 
@@ -181,9 +392,10 @@ final class LauncherWindow {
         file.setPreferredSize(new Dimension(140, 17));
         counts = label("", 12, false, MUTED);
         stats = label("", 12, false, MUTED);
+        joinStatus = label("", 13, true, MUTED);
         active = label("", 12, false, MUTED);
         estimate = label("", 12, false, MUTED);
-        for (var row : new JLabel[]{status, file, counts, stats, active}) card.add(row);
+        for (var row : new JLabel[]{status, joinStatus, file, counts, stats, active}) card.add(row);
         transfer = new JProgressBar(0, 1000);
         transfer.setPreferredSize(new Dimension(150, 8));
         transfer.setForeground(GOLD);
@@ -207,6 +419,9 @@ final class LauncherWindow {
             if (!location.isEmpty()) open(Path.of(location));
         });
         toolbar.add(openLog);
+        retry = button(t("retry"), false);
+        retry.addActionListener(event -> { if (lastAction != null) perform(lastAction); });
+        toolbar.add(retry);
         card.add(toolbar);
 
         detailPanel = stack(PANEL, 7);
@@ -232,54 +447,8 @@ final class LauncherWindow {
     }
 
     private JPanel settingsPage() {
-        var body = stack(BG, 15);
-        body.add(label(t("settingsSubtitle"), 15, false, MUTED));
-        var form = card(13);
-        username = field(settings.username(), 24);
-        form.add(labeled(t("player"), username, username));
-        folder = field(settings.profile(), 32);
-        var picker = panel(new BorderLayout(8, 0), PANEL);
-        picker.add(folder, BorderLayout.CENTER);
-        var choose = button(t("browse"), false);
-        choose.addActionListener(event -> browse());
-        picker.add(choose, BorderLayout.LINE_END);
-        form.add(labeled(t("profile"), picker, folder));
-        form.add(wrapped(t("profileHint")));
-
-        memory = field(Integer.toString(settings.ramGiB()), 5);
-        form.add(labeled(t("ram"), memory, memory));
-        form.add(wrapped(t("ramHint")));
-        var languages = new JComboBox<>(new String[]{"English", "فارسی"});
-        languages.setSelectedIndex(text.rtl ? 1 : 0);
-        languages.setBackground(BG);
-        languages.setForeground(TEXT);
-        languages.setFont(font(14, false));
-        languages.addActionListener(event -> changeLanguage(languages.getSelectedIndex() == 1 ? "fa" : "en"));
-        form.add(labeled(t("language"), languages, languages));
-
-        var buttons = panel(new FlowLayout(FlowLayout.LEADING, 8, 0), PANEL);
-        var save = button(t("save"), true);
-        save.setEnabled(!busy);
-        save.addActionListener(event -> saveSettings());
-        buttons.add(save);
-        for (String key : new String[]{"openProfile", "openLogs"}) {
-            var action = button(t(key), false);
-            action.addActionListener(event -> {
-                try {
-                    Path path = GunnertimesLauncher.profilePath(folder.getText());
-                    open(key.equals("openLogs") ? path.resolve("logs") : path);
-                } catch (GunnertimesLauncher.InputError failure) {
-                    notifyUser(failure.key, "", true);
-                }
-            });
-            buttons.add(action);
-        }
-        form.add(buttons);
-        noticeLabel = label("", 13, true, MUTED);
-        form.add(noticeLabel);
-        updateNotice();
-        body.add(form);
-        return body;
+        settingsPanel = new LauncherSettings(this, draft == null ? LauncherSettings.Draft.from(settings) : draft);
+        return settingsPanel.component();
     }
 
     private JPanel helpPage() {
@@ -293,6 +462,7 @@ final class LauncherWindow {
         examples.add(label(t("guideExisting"), 13, true, MUTED));
         examples.add(example("%APPDATA%\\.minecraft\\versions\\Goharian New Server"));
         body.add(examples);
+        body.add(guide("guideActions", "guideActionsBody"));
         body.add(guide("guideFix", "guideFixBody"));
         body.add(guide("guideLogs", "guideLogsBody"));
         return body;
@@ -311,108 +481,287 @@ final class LauncherWindow {
         return example;
     }
 
-    private void browse() {
-        var picker = new JFileChooser();
-        picker.setLocale(text.locale);
-        picker.updateUI();
-        picker.setDialogTitle(t("chooseFolder"));
-        picker.setApproveButtonText(t("browse"));
-        picker.setFileSelectionMode(JFileChooser.DIRECTORIES_ONLY);
-        try {
-            Path location = GunnertimesLauncher.profilePath(folder.getText());
-            while (location != null && !Files.isDirectory(location)) location = location.getParent();
-            if (location != null) picker.setCurrentDirectory(location.toFile());
-        } catch (GunnertimesLauncher.InputError ignored) {
-            // The picker can replace a malformed path.
-        }
-        text.orient(picker);
-        if (picker.showOpenDialog(frame) == JFileChooser.APPROVE_OPTION)
-            folder.setText(picker.getSelectedFile().getAbsolutePath());
-    }
-
     private void changeLanguage(String language) {
         if (settings.language().equals(language)) return;
-        String[] drafts = page == Page.SETTINGS
-            ? new String[]{username.getText(), folder.getText(), memory.getText()} : null;
         var translated = new GunnertimesLauncher.Preferences(settings.username(), settings.profile(),
-            language, settings.ramGiB());
+            language, settings.ramGiB(), settings.options());
         try {
             GunnertimesLauncher.save(translated);
             settings = translated;
             text = new LauncherText(language);
             render();
-            if (drafts != null) {
-                username.setText(drafts[0]);
-                folder.setText(drafts[1]);
-                memory.setText(drafts[2]);
+        } catch (IOException failure) {
+            notifyUser("settingsFailure", failure.toString(), true);
+        }
+    }
+
+    void language(String value) { changeLanguage(value); }
+    boolean working() { return busy; }
+    boolean isPersian() { return text.rtl; }
+    JFrame frame() { return frame; }
+    GunnertimesLauncher.Preferences settings() { return settings; }
+    String installedVersion() { return installed == null ? t("none") : installed.version(); }
+    String availableVersion() {
+        return catalog.available() == null ? t("unknown") : catalog.available().version();
+    }
+    String lastCheck() {
+        if (catalog.checked() == null) return t("unknown");
+        return java.time.format.DateTimeFormatter.ofLocalizedDateTime(java.time.format.FormatStyle.MEDIUM)
+            .withLocale(text.locale).withZone(java.time.ZoneId.systemDefault()).format(catalog.checked());
+    }
+    boolean checking() { return checking; }
+    void checkNow() { lookup(true); probeServer(); }
+    String checkError() { return catalogError; }
+
+    void acceptSettings(GunnertimesLauncher.Preferences value) throws IOException {
+        GunnertimesLauncher.save(value);
+        boolean changedProfile = !settings.profile().equals(value.profile());
+        settings = value;
+        if (changedProfile) {
+            installed = null;
+            inspection = null;
+            catalogReady = false;
+            profileError = "";
+            progressed = false;
+        }
+        draft = LauncherSettings.Draft.from(value);
+        settingsPanel = null;
+        notice = "saved";
+        noticeDetails = "";
+        noticeError = false;
+        render();
+        if (changedProfile) lookup(false);
+    }
+
+    void cancelSettings() {
+        settingsPanel = null;
+        draft = null;
+        notice = "";
+        noticeDetails = "";
+        render();
+    }
+
+    String messageKey() { return notice; }
+    String noticeDetails() { return noticeDetails; }
+    boolean noticeError() { return noticeError; }
+
+    private ServerStatus.Compatibility compatibility() {
+        return ServerStatus.compatibility(catalog, installed == null ? null : installed.version());
+    }
+
+    private boolean canUpdate() {
+        return installed != null && catalog.available() != null && !catalog.stale()
+            && PackService.newer(installed.version(), catalog.available().version());
+    }
+
+    private GunnertimesLauncher.Action mainAction() {
+        if (installed == null) return GunnertimesLauncher.Action.INSTALL;
+        return inspection != null && !inspection.healthy()
+            ? GunnertimesLauncher.Action.REPAIR : GunnertimesLauncher.Action.PLAY;
+    }
+
+    private static String actionKey(GunnertimesLauncher.Action action) {
+        return switch (action) {
+            case PLAY -> "play";
+            case JOIN -> "joinServer";
+            case INSTALL -> "installPack";
+            case UPDATE -> "updatePack";
+            case REPAIR -> "repairPack";
+        };
+    }
+
+    private record Lookup(PackService.Release installed, PackService.Inspection inspection, PackService.Check check,
+                          String requestError, String localError) {}
+
+    private void acceptLookup(Lookup result) {
+        catalogReady = true;
+        installed = result.installed();
+        inspection = result.inspection();
+        catalog = result.check();
+        profileError = result.localError() == null ? "" : result.localError();
+    }
+
+    private void lookup(boolean online) {
+        if (checking) return;
+        checking = true;
+        catalogError = "";
+        var previous = catalog;
+        var target = settings.profile();
+        if (frame.isShowing()) render();
+        new SwingWorker<Lookup, Void>() {
+            @Override protected Lookup doInBackground() throws Exception {
+                var service = new PackService(GunnertimesLauncher.HOME);
+                var check = previous.available() == null ? service.cached() : previous;
+                String error = "", localError = "";
+                PackService.Release pinned = null;
+                PackService.Inspection result = null;
+                try {
+                    Path profile = GunnertimesLauncher.profilePath(target);
+                    pinned = service.installed(profile);
+                    if (pinned != null) result = service.inspect(profile, pinned, ignored -> {});
+                } catch (Exception failure) {
+                    localError = failure.getMessage();
+                }
+                if (online) {
+                    var local = new Lookup(pinned, result, check, "", localError);
+                    SwingUtilities.invokeLater(() -> {
+                        if (!target.equals(settings.profile()) || busy || !frame.isDisplayable()) return;
+                        acceptLookup(local);
+                        render();
+                    });
+                    try { check = service.check(); }
+                    catch (Exception failure) {
+                        check = new PackService.Check(check.available(), check.checked(), true, true, check.notes());
+                        error = failure.getMessage();
+                    }
+                }
+                return new Lookup(pinned, result, check, error, localError);
             }
-        } catch (IOException failure) {
-            notifyUser("settingsFailure", failure.toString(), true);
-        }
+            @Override protected void done() {
+                checking = false;
+                try {
+                    var result = get();
+                    catalog = result.check();
+                    catalogError = result.requestError() == null ? "" : result.requestError();
+                    if (target.equals(settings.profile())) {
+                        if (!busy) acceptLookup(result);
+                    } else {
+                        lookup(false);
+                        return;
+                    }
+                } catch (Exception failure) {
+                    catalogError = failure.toString();
+                }
+                if (frame.isDisplayable() && !busy) render();
+            }
+        }.execute();
     }
 
-    private void saveSettings() {
-        try {
-            var updated = GunnertimesLauncher.validated(username.getText(), folder.getText(),
-                settings.language(), memory.getText(), false);
-            GunnertimesLauncher.save(updated);
-            settings = updated;
-            folder.setText(updated.profile());
-            notifyUser("saved", "", false);
-        } catch (GunnertimesLauncher.InputError failure) {
-            notifyUser(failure.key, "", true);
-        } catch (IOException failure) {
-            notifyUser("settingsFailure", failure.toString(), true);
-        }
+    private void probeServer() {
+        serverChecking = true;
+        new SwingWorker<ServerStatus.Result, Void>() {
+            @Override protected ServerStatus.Result doInBackground() { return ServerStatus.probe(); }
+            @Override protected void done() {
+                try { server = get(); }
+                catch (Exception failure) { server = ServerStatus.Result.unknown(); }
+                serverChecking = false;
+                if (frame.isDisplayable() && page == Page.PLAY && !busy) render();
+            }
+        }.execute();
     }
 
-    private void start() {
+    private void verify() {
+        if (installed == null || busy) return;
+        lookup(false);
+    }
+
+    private void perform(GunnertimesLauncher.Action action) {
         if (busy) return;
+        var selected = settings;
         try {
-            GunnertimesLauncher.validated(settings.username(), settings.profile(), settings.language(),
-                Integer.toString(settings.ramGiB()), true);
+            boolean startsGame = action == GunnertimesLauncher.Action.PLAY || action == GunnertimesLauncher.Action.JOIN;
+            GunnertimesLauncher.validated(selected.username(), selected.profile(), selected.language(),
+                Integer.toString(selected.ramGiB()), selected.options(), startsGame);
         } catch (GunnertimesLauncher.InputError failure) {
             page = Page.SETTINGS;
             notice = failure.key;
             noticeError = true;
             render();
-            username.requestFocusInWindow();
             return;
         }
+        PackService.Release selection = null;
+        Map<String, String> repairs = Map.of();
+        if (action == GunnertimesLauncher.Action.INSTALL || action == GunnertimesLauncher.Action.UPDATE) {
+            if (catalog.available() == null || action == GunnertimesLauncher.Action.UPDATE && !canUpdate()) return;
+            selection = catalog.available();
+            String before = installed == null ? t("none") : installed.version();
+            if (!confirm(t(actionKey(action)), t("installedVersion") + "  " + before + "\n"
+                    + t("targetVersion") + "  " + selection.version())) return;
+        } else if (action == GunnertimesLauncher.Action.REPAIR) {
+            if (installed == null || inspection == null) return;
+            selection = installed;
+            var problems = inspection.problems();
+            if (problems.isEmpty()) return;
+            var preview = problems.stream().map(item -> t("condition." + item.condition().name()) + "  " + item.location())
+                .collect(java.util.stream.Collectors.joining("\n"));
+            if (problems.stream().anyMatch(item -> item.condition() == PackService.Condition.CONFLICT)) {
+                detailDialog(t("failure.conflict"), preview);
+                return;
+            }
+            if (!confirm(t("repairPack"), t("repairPreview") + "\n\n" + preview)) return;
+            repairs = inspection.approvedRepairs();
+        }
+        start(selected, new GunnertimesLauncher.Request(action, selection, catalog, repairs));
+    }
+
+    private void start(GunnertimesLauncher.Preferences selected, GunnertimesLauncher.Request request) {
         session = new LauncherSession();
+        lastAction = request.action();
+        progressed = true;
         busy = true;
         expanded = false;
-        var selected = settings;
+        page = Page.PLAY;
         var runningSession = session;
-        refresh();
+        render();
+        SwingUtilities.invokeLater(() -> pageScroll.getVerticalScrollBar().setValue(
+            pageScroll.getVerticalScrollBar().getMaximum()));
         new SwingWorker<Void, Void>() {
             @Override protected Void doInBackground() throws Exception {
-                GunnertimesLauncher.play(selected, runningSession::accept);
+                GunnertimesLauncher.run(selected, request, runningSession::accept);
                 return null;
             }
             @Override protected void done() {
                 busy = false;
-                try {
-                    get();
-                } catch (InterruptedException failure) {
-                    Thread.currentThread().interrupt();
-                } catch (ExecutionException failure) {
-                    expanded = true;
+                if (minimized) {
+                    frame.setState(Frame.NORMAL);
+                    minimized = false;
                 }
-                if (page == Page.PLAY) refresh();
-                else if (page == Page.SETTINGS) render();
+                try { get(); }
+                catch (InterruptedException failure) { Thread.currentThread().interrupt(); }
+                catch (ExecutionException failure) { expanded = true; }
+                render();
+                if (page == Page.PLAY) SwingUtilities.invokeLater(() -> pageScroll.getVerticalScrollBar()
+                    .setValue(pageScroll.getVerticalScrollBar().getMaximum()));
+                lookup(false);
             }
         }.execute();
+    }
+
+    boolean confirm(String title, String description) {
+        var contents = dialogText(description);
+        Object[] choices = {t("continue"), t("cancel")};
+        return JOptionPane.showOptionDialog(frame, contents, title, JOptionPane.OK_CANCEL_OPTION,
+            JOptionPane.QUESTION_MESSAGE, null, choices, choices[1]) == 0;
+    }
+
+    void detailDialog(String title, String description) {
+        JOptionPane.showMessageDialog(frame, dialogText(description), title, JOptionPane.INFORMATION_MESSAGE);
+    }
+
+    private JScrollPane dialogText(String message) {
+        var area = new JTextArea(message, Math.min(10, Math.max(2, message.split("\\R").length + 1)), 46);
+        area.setEditable(false);
+        area.setLineWrap(true);
+        area.setWrapStyleWord(true);
+        area.setFont(font(14, false));
+        area.setForeground(TEXT);
+        area.setBackground(PANEL);
+        area.setBorder(new EmptyBorder(10, 10, 10, 10));
+        text.orient(area);
+        return scroll(area);
     }
 
     private void refresh() {
         var snapshot = session.snapshot();
         var event = snapshot.current();
         boolean failed = event != null && event.status() == Updater.Status.FAILED;
-        primary.setText(t(failed ? "retry" : busy
-            ? "running".equals(snapshot.steps().get(Updater.Step.RUN)) ? "inGame" : "preparing"
-            : "play"));
-        primary.setEnabled(!busy);
+        if (busy) {
+            primary.setText(t("running".equals(snapshot.steps().get(Updater.Step.RUN)) ? "inGame" : "preparing"));
+            primary.setEnabled(false);
+        }
+        String serverResult = snapshot.join();
+        joinStatus.setText(serverResult.isEmpty() ? "" : t("join." + serverResult));
+        joinStatus.setVisible(!serverResult.isEmpty());
         for (var pair : stages.entrySet()) {
             String state = snapshot.steps().getOrDefault(pair.getKey(), "wait");
             pair.getValue().setText(t("state." + state));
@@ -454,7 +803,8 @@ final class LauncherWindow {
             .collect(java.util.stream.Collectors.joining(" · ")));
         transfer.setVisible(first != null);
         boolean known = first != null && first.total() > 0;
-        transfer.setIndeterminate(first != null && !known);
+        transfer.setIndeterminate(first != null && !known && !LaunchOptions.reduceMotion(settings.options()));
+        if (!known) transfer.setValue(0);
         if (known) transfer.setValue((int) Math.min(1000, 1000.0 * first.count() / first.total()));
         String amount = first == null ? "" : bytes(first.count()) + (known
             ? " / " + bytes(first.total()) + "   ·   " + number(Math.min(100, 100 * first.count() / first.total())) + "%" : "");
@@ -465,6 +815,8 @@ final class LauncherWindow {
         estimate.setText(amount);
         estimate.setVisible(first != null);
         openLog.setVisible(!snapshot.log().isEmpty());
+        openLog.setText(t(snapshot.steps().containsKey(Updater.Step.RUN) ? "openLog" : "openLauncherLog"));
+        retry.setVisible(!busy && failed && lastAction != null);
         detailPanel.setVisible(expanded);
         if (expanded) showDetails(snapshot);
     }
@@ -493,6 +845,8 @@ final class LauncherWindow {
 
     private String status(Updater.Progress event) {
         if (event == null) return t("idle");
+        if (event.group().equals("join")) return t("join." + LauncherSession.joinState(event.status()));
+        if (event.status() == Updater.Status.DONE && event.step() == Updater.Step.INSTALL) return t("installDone");
         if (event.status() == Updater.Status.FAILED) {
             String error = event.detail();
             if (error.contains("mod conflict") || error.contains("file conflict") || error.contains("Cannot read mod"))
@@ -517,7 +871,7 @@ final class LauncherWindow {
         };
     }
 
-    private void open(Path path) {
+    void open(Path path) {
         if (!Files.exists(path)) {
             notifyUser("missingFolder", path.toString(), false);
             return;
@@ -533,21 +887,15 @@ final class LauncherWindow {
         notice = key;
         noticeDetails = detail;
         noticeError = error;
-        if (page == Page.SETTINGS) updateNotice();
+        if (page == Page.SETTINGS) render();
         else JOptionPane.showMessageDialog(frame, t(key) + (detail.isEmpty() ? "" : "\n" + detail),
             "Gunnertimes", error ? JOptionPane.ERROR_MESSAGE : JOptionPane.INFORMATION_MESSAGE);
     }
 
-    private void updateNotice() {
-        noticeLabel.setText(notice.isEmpty() ? "" : t(notice));
-        noticeLabel.setToolTipText(noticeDetails.isEmpty() ? null : noticeDetails);
-        noticeLabel.setForeground(noticeError ? RED : GREEN);
-    }
-
-    private String t(String key) { return text.get(key); }
+    String t(String key) { return text.get(key); }
     private String number(long value) { return NumberFormat.getIntegerInstance(text.locale).format(value); }
 
-    private String bytes(long value) {
+    String bytes(long value) {
         if (value < 1024) return number(value) + " B";
         double amount = value / 1024.0;
         String unit = " KiB";
@@ -560,11 +908,11 @@ final class LauncherWindow {
 
     private static String ltr(String value) { return "\u2066" + value + "\u2069"; }
 
-    private Font font(int size, boolean bold) {
+    Font font(int size, boolean bold) {
         return new Font(text.rtl ? "Tahoma" : "Segoe UI", bold ? Font.BOLD : Font.PLAIN, size);
     }
 
-    private JLabel label(String title, int size, boolean bold, Color color) {
+    JLabel label(String title, int size, boolean bold, Color color) {
         var label = new JLabel(title, SwingConstants.LEADING);
         label.setFont(font(size, bold));
         label.setForeground(color);
@@ -591,6 +939,12 @@ final class LauncherWindow {
                         g.drawLine(10, 6, 10, 10);
                         g.drawLine(6, 10, 6, 14);
                     }
+                    case PACK -> {
+                        g.drawPolygon(new int[]{8, 14, 14, 8, 2, 2}, new int[]{1, 4, 11, 15, 11, 4}, 6);
+                        g.drawLine(2, 4, 8, 8);
+                        g.drawLine(14, 4, 8, 8);
+                        g.drawLine(8, 8, 8, 15);
+                    }
                     case HELP -> {
                         g.drawOval(1, 1, 14, 14);
                         g.setFont(new Font("Dialog", Font.BOLD, 11));
@@ -602,7 +956,7 @@ final class LauncherWindow {
         };
     }
 
-    private JButton button(String title, boolean accent) {
+    JButton button(String title, boolean accent) {
         var button = new JButton(title) {
             @Override protected void paintComponent(Graphics graphics) {
                 var g = (Graphics2D) graphics.create();
@@ -612,6 +966,11 @@ final class LauncherWindow {
                 else if (getModel().isRollover()) fill = fill.brighter();
                 g.setColor(fill);
                 g.fillRoundRect(0, 0, getWidth(), getHeight(), 11, 11);
+                if (Boolean.TRUE.equals(getClientProperty("outlined"))) {
+                    g.setColor(isEnabled() ? GOLD : new Color(0x806748));
+                    g.setStroke(new BasicStroke(1.7f));
+                    g.drawRoundRect(1, 1, getWidth() - 3, getHeight() - 3, 11, 11);
+                }
                 if (isFocusOwner()) {
                     g.setColor(accent ? BG : GOLD);
                     g.drawRoundRect(3, 3, getWidth() - 7, getHeight() - 7, 8, 8);
@@ -630,7 +989,7 @@ final class LauncherWindow {
         return button;
     }
 
-    private JTextField field(String value, int columns) {
+    JTextField field(String value, int columns) {
         var input = technical(new JTextField(value, columns));
         input.setFont(font(14, false));
         input.setForeground(TEXT);
@@ -642,7 +1001,7 @@ final class LauncherWindow {
         return input;
     }
 
-    private JPanel labeled(String title, JComponent input, JComponent focus) {
+    JPanel labeled(String title, JComponent input, JComponent focus) {
         var row = panel(new BorderLayout(0, 5), PANEL);
         var caption = label(title, 14, true, TEXT);
         caption.setLabelFor(focus);
@@ -651,7 +1010,7 @@ final class LauncherWindow {
         return row;
     }
 
-    private JTextArea wrapped(String value) {
+    JTextArea wrapped(String value) {
         var area = new JTextArea(value, 0, 38);
         area.setEditable(false);
         area.setLineWrap(true);
@@ -664,32 +1023,56 @@ final class LauncherWindow {
         return area;
     }
 
-    private static <T extends JComponent> T technical(T component) {
+    static <T extends JComponent> T technical(T component) {
         component.putClientProperty("technical", true);
         return component;
     }
 
-    private static JPanel panel(LayoutManager layout, Color color) {
+    static JPanel panel(LayoutManager layout, Color color) {
         var panel = new JPanel(layout);
         if (color == null) panel.setOpaque(false);
         else panel.setBackground(color);
         return panel;
     }
 
-    private static JPanel stack(Color color, int gap) { return panel(new Vertical(gap), color); }
+    static JPanel stack(Color color, int gap) { return panel(new Vertical(gap), color); }
 
-    private static JPanel card(int gap) {
+    static JPanel card(int gap) {
         var panel = stack(PANEL, gap);
         panel.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(EDGE),
             new EmptyBorder(15, 17, 15, 17)));
         return panel;
     }
 
-    private static JScrollPane scroll(JComponent value) {
+    static JScrollPane scroll(JComponent value) {
         var pane = new JScrollPane(value, JScrollPane.VERTICAL_SCROLLBAR_AS_NEEDED,
             JScrollPane.HORIZONTAL_SCROLLBAR_NEVER);
         pane.setBorder(BorderFactory.createEmptyBorder());
         pane.getViewport().setBackground(BG);
+        var bar = pane.getVerticalScrollBar();
+        bar.setPreferredSize(new Dimension(10, 0));
+        bar.setUI(new javax.swing.plaf.basic.BasicScrollBarUI() {
+            @Override protected JButton createDecreaseButton(int orientation) { return scrollEnd(); }
+            @Override protected JButton createIncreaseButton(int orientation) { return scrollEnd(); }
+            @Override protected void paintTrack(Graphics g, JComponent c, Rectangle bounds) {
+                g.setColor(RAIL);
+                g.fillRect(bounds.x, bounds.y, bounds.width, bounds.height);
+            }
+            @Override protected void paintThumb(Graphics g, JComponent c, Rectangle bounds) {
+                if (bounds.isEmpty() || !c.isEnabled()) return;
+                g.setColor(isThumbRollover() ? new Color(0x73757B) : new Color(0x51545D));
+                g.fillRoundRect(bounds.x + 2, bounds.y + 2, bounds.width - 4, bounds.height - 4, 7, 7);
+            }
+            private JButton scrollEnd() {
+                JButton end = new JButton();
+                Dimension empty = new Dimension(0, 0);
+                end.setPreferredSize(empty);
+                end.setMinimumSize(empty);
+                end.setMaximumSize(empty);
+                end.setFocusable(false);
+                return end;
+            }
+        });
         return pane;
     }
 
@@ -716,10 +1099,11 @@ final class LauncherWindow {
                 int width = (int) Math.ceil(art.getWidth() * scale);
                 int height = (int) Math.ceil(art.getHeight() * scale);
                 g.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
-                g.drawImage(art, rtl ? (w + width) / 2 : (w - width) / 2,
-                    (h - height) / 2, rtl ? -width : width, height, null);
+                int offset = Math.min((width - w) / 2, w / 11);
+                g.drawImage(art, !rtl ? (w + width) / 2 + offset : (w - width) / 2 - offset,
+                    (h - height) / 2, !rtl ? -width : width, height, null);
             }
-            g.setPaint(new GradientPaint(rtl ? w : 0, 0, new Color(0xD0141B23, true),
+            g.setPaint(new GradientPaint(rtl ? w : 0, 0, new Color(0x99141B23, true),
                 rtl ? w * .26f : w * .74f, 0, new Color(0x00141B23, true)));
             g.fillRect(0, 0, w, h);
             g.setPaint(new GradientPaint(0, h * .33f, new Color(0x00121921, true), 0, h,

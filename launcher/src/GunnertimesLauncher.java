@@ -1,26 +1,27 @@
 import com.google.gson.*;
 import java.io.*;
-import java.net.URI;
 import java.nio.channels.FileChannel;
 import java.nio.file.*;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatter;
-import java.util.Base64;
+import java.util.Map;
+import java.util.concurrent.TimeUnit;
 import java.util.List;
 import javax.swing.*;
 
 public final class GunnertimesLauncher {
-    private static final Path HOME = Path.of(System.getenv("LOCALAPPDATA"), "Gunnertimes");
+    static final Path HOME = Path.of(System.getenv("LOCALAPPDATA"), "Gunnertimes");
     static final Path DEFAULT_PROFILE = HOME.resolve("profiles/Gunnertimes");
     private static final Path PREFERENCES = HOME.resolve("launcher.json");
-    private static final Path CACHE = HOME.resolve("game");
+    static final Path CACHE = HOME.resolve("game");
 
-    record Preferences(String username, String profile, String language, int ramGiB) {
+    record Preferences(String username, String profile, String language, int ramGiB, LaunchOptions.Settings options) {
         Preferences {
             if (username == null) username = "";
             if (profile == null || profile.isBlank()) profile = DEFAULT_PROFILE.toString();
             if (!"fa".equals(language)) language = "en";
             if (ramGiB < 2 || ramGiB > 32) ramGiB = 4;
+            if (options == null) options = LaunchOptions.Settings.defaults();
         }
     }
 
@@ -31,20 +32,18 @@ public final class GunnertimesLauncher {
             this.key = key;
         }
     }
-    record SignedRelease(String manifest, String signature) {
-        Updater.Pack verify(Updater.Config config) throws Exception {
-            var base64 = Base64.getDecoder();
-            return Updater.verifyManifest(config, base64.decode(manifest), base64.decode(signature));
-        }
+    enum Action { PLAY, JOIN, INSTALL, UPDATE, REPAIR }
+
+    record Request(Action action, PackService.Release selection, PackService.Check check, Map<String, String> repairs) {
+        Request(Action action, PackService.Check check) { this(action, null, check, Map.of()); }
     }
-    record Release(Updater.Pack pack, SignedRelease signed, boolean offline) {}
 
     public static void main(String[] args) throws Exception {
         if (args.length == 3 && args[0].equals("--play")) {
             Preferences current = preferences();
-            Preferences selected = validated(args[1], args[2], current.language(), Integer.toString(current.ramGiB()), true);
+            Preferences selected = validated(args[1], args[2], current.language(), Integer.toString(current.ramGiB()), current.options(), true);
             save(selected);
-            play(selected, event -> {
+            run(selected, new Request(Action.PLAY, PackService.Check.empty()), event -> {
                 if (event.status() != Updater.Status.REUSED && event.status() != Updater.Status.TRANSFER)
                     System.out.println(event);
             });
@@ -60,7 +59,11 @@ public final class GunnertimesLauncher {
         } catch (IOException | JsonParseException ignored) {
             // Start with defaults when there is no readable settings file.
         }
-        return new Preferences("", DEFAULT_PROFILE.toString(), "en", 4);
+        return defaults("en");
+    }
+
+    static Preferences defaults(String language) {
+        return new Preferences("", DEFAULT_PROFILE.toString(), language, 4, LaunchOptions.Settings.defaults());
     }
 
     static void save(Preferences preferences) throws IOException {
@@ -68,7 +71,7 @@ public final class GunnertimesLauncher {
             .getBytes(java.nio.charset.StandardCharsets.UTF_8));
     }
 
-    static Preferences validated(String name, String folder, String language, String ram, boolean requireName)
+    static Preferences validated(String name, String folder, String language, String ram, LaunchOptions.Settings options, boolean requireName)
             throws InputError {
         name = name.strip();
         if ((requireName || !name.isEmpty()) && !name.matches("[A-Za-z0-9_]{3,16}"))
@@ -80,7 +83,7 @@ public final class GunnertimesLauncher {
             throw new InputError("invalidRam");
         }
         if (memory < 2 || memory > 32) throw new InputError("invalidRam");
-        return new Preferences(name, profilePath(folder).toString(), language, memory);
+        return new Preferences(name, profilePath(folder).toString(), language, memory, options);
     }
 
     static Path profilePath(String value) throws InputError {
@@ -104,13 +107,14 @@ public final class GunnertimesLauncher {
         throw new InputError("invalidFolder");
     }
 
-    static void play(Preferences settings, Updater.ProgressSink observer) throws Exception {
+    static void run(Preferences settings, Request request, Updater.ProgressSink observer) throws Exception {
         Path profile;
         Path logs;
         Path journal;
         try {
             profile = Files.createDirectories(profilePath(settings.profile())).toRealPath();
             logs = Files.createDirectories(profile.resolve("logs"));
+            if (!logs.toRealPath().equals(logs)) throw new IOException("Linked log directory.");
             journal = Files.createTempFile(logs, "gunnertimes-launcher-", ".log");
         } catch (Exception failure) {
             observer.report(Updater.Progress.failed(Updater.Step.CHECK, "session", "", failure));
@@ -118,7 +122,7 @@ public final class GunnertimesLauncher {
         }
         observer.report(Updater.Progress.of(Updater.Step.CHECK, Updater.Status.BEGIN, "session", journal.toString()));
         try (var writer = new PrintWriter(Files.newBufferedWriter(journal), true)) {
-            launch(settings, profile, logs, event -> {
+            operate(settings, request, profile, logs, event -> {
                 observer.report(event);
                 if (event.status() == Updater.Status.TRANSFER ||
                         event.status() == Updater.Status.REUSED && event.group().equals("assets")) return;
@@ -127,47 +131,69 @@ public final class GunnertimesLauncher {
         }
     }
 
-    private static void launch(Preferences settings, Path profile, Path logs, Updater.ProgressSink progress)
-            throws Exception {
+    private static void operate(Preferences settings, Request request, Path profile, Path logs,
+            Updater.ProgressSink progress) throws Exception {
         Updater.Step stage = Updater.Step.CHECK;
         Path log = null;
-        progress.report(Updater.Progress.of(stage, Updater.Status.BEGIN, "release", ""));
         try {
             Files.createDirectories(HOME);
             try (FileChannel channel = FileChannel.open(HOME.resolve("launcher.lock"),
                     StandardOpenOption.CREATE, StandardOpenOption.WRITE); var lock = channel.tryLock()) {
                 if (lock == null) throw new IOException("Gunnertimes is already preparing or running a game.");
-                Updater.Config config = Updater.configuration(DEFAULT_PROFILE.resolve(".embedded-channel"));
-                Path state = Files.createDirectories(profile.resolve(Updater.STATE));
-                if (!state.toRealPath().equals(state)) throw new IOException("Linked updater directory.");
-                Path signedRelease = state.resolve("signed-release.json");
-                Release release = release(config, signedRelease);
-                progress.report(Updater.Progress.of(stage,
-                    release.offline ? Updater.Status.OFFLINE : Updater.Status.DONE, "release", release.pack.version()));
-
-                List<String> command = new MinecraftFiles(CACHE, progress)
-                    .prepare(profile, settings.username(), settings.ramGiB());
-                if (release.offline) {
-                    verifyOfflineMods(profile, release.pack, progress);
-                    progress.report(Updater.Progress.of(Updater.Step.INSTALL, Updater.Status.SKIPPED, "pack", ""));
-                } else {
-                    Updater.installObserved(profile, config, release.pack, false, progress);
-                    stage = Updater.Step.INSTALL;
-                    MinecraftFiles.write(signedRelease, Updater.JSON.toJson(release.signed)
-                        .getBytes(java.nio.charset.StandardCharsets.UTF_8));
+                var packs = new PackService(HOME);
+                var installed = packs.installed(profile);
+                Action action = request.action;
+                if (action == Action.INSTALL || action == Action.UPDATE || action == Action.REPAIR) {
+                    var selected = request.selection;
+                    if (selected == null) throw new IOException("No verified release selected.");
+                    if (action == Action.INSTALL && installed != null)
+                        throw new IOException("A pack is already installed. Use Update or Repair.");
+                    if (action == Action.UPDATE && (installed == null ||
+                            !PackService.newer(installed.version(), selected.version())))
+                        throw new IOException("The selected release is no longer newer than the install.");
+                    if (action == Action.REPAIR && (installed == null ||
+                            !installed.envelope().equals(selected.envelope())))
+                        throw new IOException("The installed release changed. Verify it again.");
+                    progress.report(Updater.Progress.of(stage, Updater.Status.DONE, "release", selected.version()));
+                    packs.apply(profile, selected, request.repairs, progress);
+                    return;
                 }
+
+                if (installed == null) throw new IOException("Install the signed pack before playing.");
+                progress.report(Updater.Progress.of(stage, Updater.Status.DONE, "release", installed.version()));
+                if (action == Action.JOIN && ServerStatus.compatibility(request.check, installed.version())
+                        == ServerStatus.Compatibility.INCOMPATIBLE)
+                    throw new IOException("The official server lists this installed pack as incompatible.");
+                var inspection = packs.inspect(profile, installed, progress);
+                if (!inspection.healthy()) {
+                    var first = inspection.problems().getFirst();
+                    throw new IOException((first.condition() == PackService.Condition.CONFLICT
+                        ? "Local file conflict: " : "Installed file needs repair: ") + first.location());
+                }
+                List<String> command = new MinecraftFiles(CACHE, progress)
+                    .prepare(profile, settings.username(), settings.ramGiB(), settings.options());
+                progress.report(Updater.Progress.of(Updater.Step.INSTALL, Updater.Status.SKIPPED, "pack", ""));
                 stage = Updater.Step.START;
                 progress.report(Updater.Progress.of(stage, Updater.Status.BEGIN, "game", ""));
                 log = Files.createTempFile(logs, "gunnertimes-"
                     + LocalDateTime.now().format(DateTimeFormatter.ofPattern("uuuuMMdd-HHmmss")) + "-", ".log");
-                Process game = new ProcessBuilder(command).directory(profile.toFile()).redirectErrorStream(true)
-                    .redirectOutput(log.toFile()).start();
-                progress.report(Updater.Progress.of(stage, Updater.Status.DONE, "game", log.toString()));
-                stage = Updater.Step.RUN;
-                progress.report(Updater.Progress.of(stage, Updater.Status.BEGIN, "game", log.toString()));
-                int code = game.waitFor();
-                if (code != 0) throw new IOException("Minecraft exited with code " + code + ".");
-                progress.report(Updater.Progress.of(stage, Updater.Status.DONE, "game", log.toString()));
+                Path quickPlay = null;
+                if (action == Action.JOIN) {
+                    quickPlay = logs.resolve(log.getFileName() + ".join.json");
+                    command.addAll(List.of("--quickPlayPath", profile.relativize(quickPlay).toString().replace('\\', '/'),
+                        "--quickPlayMultiplayer", ServerStatus.ADDRESS));
+                }
+                try (var options = LaunchOptions.displayOverride(profile, settings.options())) {
+                    Process game = new ProcessBuilder(command).directory(profile.toFile()).redirectErrorStream(true)
+                        .redirectOutput(log.toFile()).start();
+                    progress.report(Updater.Progress.of(stage, Updater.Status.DONE, "game", log.toString()));
+                    stage = Updater.Step.RUN;
+                    progress.report(Updater.Progress.of(stage, Updater.Status.BEGIN, "game", log.toString()));
+                    if (quickPlay != null) observeJoin(game, log, quickPlay, progress);
+                    int code = game.waitFor();
+                    if (code != 0) throw new IOException("Minecraft exited with code " + code + ".");
+                    progress.report(Updater.Progress.of(stage, Updater.Status.DONE, "game", log.toString()));
+                }
             }
         } catch (Exception failure) {
             progress.report(Updater.Progress.failed(stage, stage == Updater.Step.CHECK ? "" : "game",
@@ -176,42 +202,35 @@ public final class GunnertimesLauncher {
         }
     }
 
-    private static Release release(Updater.Config config, Path signedRelease) throws Exception {
-        byte[] bytes;
-        byte[] signature;
-        try {
-            bytes = Updater.fetch(URI.create(config.manifest()), false, 4_000_000);
-            signature = Updater.fetch(URI.create(config.manifest() + ".sig"), false, 64);
-        } catch (IOException unavailable) {
-            if (!Files.isRegularFile(signedRelease)) throw unavailable;
-            SignedRelease cached = Updater.JSON.fromJson(Files.readString(signedRelease), SignedRelease.class);
-            return new Release(cached.verify(config), cached, true);
-        }
-        var base64 = Base64.getEncoder();
-        SignedRelease artifact = new SignedRelease(base64.encodeToString(bytes), base64.encodeToString(signature));
-        return new Release(Updater.verifyManifest(config, bytes, signature), artifact, false);
-    }
-
-    private static void verifyOfflineMods(Path profile, Updater.Pack pack, Updater.ProgressSink progress)
-            throws Exception {
-        long checked = 0;
-        for (Updater.Entry entry : pack.files()) {
-            Path path = Updater.destination(profile, entry.path());
-            progress.report(Updater.Progress.of(Updater.Step.CHECK, Updater.Status.BEGIN, "pack", entry.path()));
-            boolean found = Files.isRegularFile(path) && Updater.hash(path).equals(entry.sha512());
-            if (!found && entry.modId() != null && Files.isDirectory(profile.resolve("mods"))) {
-                try (var candidates = Files.newDirectoryStream(profile.resolve("mods"), "*.jar")) {
-                    for (Path candidate : candidates) {
-                        if (Updater.hash(candidate).equals(entry.sha512())) {
-                            found = true;
-                            break;
-                        }
+    private static void observeJoin(Process game, Path log, Path quickPlay, Updater.ProgressSink progress)
+            throws InterruptedException {
+        progress.report(Updater.Progress.of(Updater.Step.RUN, Updater.Status.BEGIN, "join", ServerStatus.ADDRESS));
+        var outcome = Updater.Status.SKIPPED;
+        long deadline = System.nanoTime() + TimeUnit.MINUTES.toNanos(3);
+        do {
+            try {
+                if (Files.isRegularFile(quickPlay) && Files.size(quickPlay) < 65_536) {
+                    var entry = MinecraftFiles.json(Files.readAllBytes(quickPlay));
+                    if (entry.has("id") && ServerStatus.ADDRESS.equalsIgnoreCase(entry.get("id").getAsString())
+                            && entry.has("type") && "multiplayer".equals(entry.get("type").getAsString())) {
+                        outcome = Updater.Status.DONE;
+                        break;
                     }
                 }
+                try (var reader = new RandomAccessFile(log.toFile(), "r")) {
+                    reader.seek(Math.max(0, reader.length() - 262_144));
+                    byte[] bytes = new byte[(int) (reader.length() - reader.getFilePointer())];
+                    reader.readFully(bytes);
+                    String tail = new String(bytes, java.nio.charset.StandardCharsets.UTF_8);
+                    if (tail.contains("Couldn't connect to server") || tail.contains("Failed to connect to the server")) {
+                        outcome = Updater.Status.FAILED;
+                        break;
+                    }
+                }
+            } catch (IOException | RuntimeException ignored) {
+                // Minecraft may still be writing one of these files.
             }
-            if (!found) throw new IOException("Cached release needs repair while online: " + entry.path());
-            progress.report(Updater.Progress.of(Updater.Step.CHECK, Updater.Status.REUSED, "pack", entry.path()));
-            progress.report(Updater.Progress.count(Updater.Step.CHECK, "pack", entry.path(), ++checked, pack.files().size()));
-        }
+        } while (System.nanoTime() < deadline && !game.waitFor(1, TimeUnit.SECONDS));
+        progress.report(Updater.Progress.of(Updater.Step.RUN, outcome, "join", ServerStatus.ADDRESS));
     }
 }

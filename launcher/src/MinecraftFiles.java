@@ -10,6 +10,7 @@ import java.util.concurrent.*;
 final class MinecraftFiles {
     static final String VERSION = "26.3";
     static final String LOADER = "0.20.1";
+    static final String LAUNCHER_VERSION = "1.2.0";
     private static final String FABRIC_ID = "fabric-loader-" + LOADER + "-" + VERSION;
     private static final String MOJANG_META = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
     private static final String FABRIC_META = "https://meta.fabricmc.net/v2/versions/loader/"
@@ -26,10 +27,10 @@ final class MinecraftFiles {
     }
 
     List<String> prepare(Path profile, String username) throws Exception {
-        return prepare(profile, username, 4);
+        return prepare(profile, username, 4, LaunchOptions.Settings.defaults());
     }
 
-    List<String> prepare(Path profile, String username, int ramGiB) throws Exception {
+    List<String> prepare(Path profile, String username, int ramGiB, LaunchOptions.Settings options) throws Exception {
         progress.report(Updater.Progress.of(Updater.Step.CHECK, Updater.Status.BEGIN, "minecraft", ""));
         Path versions = cache.resolve("versions");
         Path baseMetadata = versions.resolve(VERSION + ".json");
@@ -120,11 +121,11 @@ final class MinecraftFiles {
             Map.entry("version_name", FABRIC_ID), Map.entry("version_type", "release"),
             Map.entry("game_directory", profile.toString()), Map.entry("assets_root", assets.toString()),
             Map.entry("assets_index_name", assetId), Map.entry("natives_directory", natives.toString()),
-            Map.entry("launcher_name", "Gunnertimes"), Map.entry("launcher_version", "1.0"),
+            Map.entry("launcher_name", "Gunnertimes"), Map.entry("launcher_version", LAUNCHER_VERSION),
             Map.entry("classpath", String.join(File.pathSeparator, classpath.stream().map(Path::toString).toList()))
         );
         List<String> command = new ArrayList<>();
-        command.add(javaExecutable());
+        command.add(LaunchOptions.resolve(options).executable().toString());
         command.add("-Xms512M");
         command.add("-Xmx" + ramGiB + "G");
         command.add(string(logging, "argument").replace("${path}", logConfig.toString()));
@@ -133,33 +134,12 @@ final class MinecraftFiles {
         command.add(string(fabric, "mainClass"));
         addArguments(command, base, "game", values);
         addArguments(command, fabric, "game", values);
+        if (options.display().equals("fullscreen")) command.add("--fullscreen");
+        if (options.display().equals("windowed") && options.width() > 0) {
+            command.addAll(List.of("--width", Integer.toString(options.width()), "--height",
+                Integer.toString(options.height())));
+        }
         return command;
-    }
-
-    private static String javaExecutable() {
-        Set<Path> candidates = new LinkedHashSet<>();
-        String home = System.getenv("JAVA_HOME");
-        if (home != null && !home.isBlank()) candidates.add(Path.of(home, "bin"));
-        for (String directory : System.getenv().getOrDefault("PATH", "").split(";")) {
-            try {
-                if (!directory.isBlank()) candidates.add(Path.of(directory.replace("\"", "")));
-            } catch (InvalidPathException ignored) {
-                // Ignore malformed entries in the system search path.
-            }
-        }
-        for (Path bin : candidates) {
-            Path candidate = bin.resolve("java.exe");
-            Path parent = bin.toAbsolutePath().getParent();
-            if (parent == null || !Files.isRegularFile(candidate)) continue;
-            try {
-                String release = Files.readString(parent.resolve("release"));
-                if ((release.contains("JAVA_VERSION=\"25.") || release.contains("JAVA_VERSION=\"25\""))
-                        && release.contains("OS_ARCH=\"amd64\"")) return candidate.toAbsolutePath().toString();
-            } catch (IOException ignored) {
-                // The application image includes a Windows Java 25 runtime.
-            }
-        }
-        return Path.of(System.getProperty("java.home"), "bin", "java.exe").toString();
     }
 
     private static void validateFabric(JsonObject profile) throws IOException {

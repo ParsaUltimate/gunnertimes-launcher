@@ -7,7 +7,7 @@ import java.util.Map;
 final class LauncherSession {
     record Snapshot(Map<Updater.Step, String> steps, Map<String, Updater.Progress> counts,
         List<Updater.Progress> active, List<Updater.Progress> history, Updater.Progress current,
-        String release, boolean offline, String log, long received, long verified, long reused,
+        String release, boolean offline, String log, String join, long received, long verified, long reused,
         long bytesPerSecond, long currentFileBytesPerSecond) {}
 
     private final Map<Updater.Step, String> steps = new EnumMap<>(Updater.Step.class);
@@ -17,6 +17,7 @@ final class LauncherSession {
     private Updater.Progress current;
     private String release = "";
     private String log = "";
+    private String join = "";
     private boolean offline;
     private long received;
     private long verified;
@@ -30,6 +31,12 @@ final class LauncherSession {
         var step = event.step();
         var status = event.status();
         var file = event.file();
+        if (event.group().equals("join")) {
+            join = joinState(status);
+            history.addLast(event);
+            if (history.size() > 120) history.removeFirst();
+            return;
+        }
         String key = event.group() + "/" + file;
         if (event.group().equals("release") && (status == Updater.Status.DONE || status == Updater.Status.OFFLINE)) {
             release = file;
@@ -89,6 +96,17 @@ final class LauncherSession {
         }
     }
 
+    static String joinState(Updater.Status status) {
+        return switch (status) {
+            case DONE -> "confirmed";
+            case FAILED -> "failed";
+            case SKIPPED -> "unknown";
+            default -> "attempting";
+        };
+    }
+
+    synchronized boolean isRunning() { return "running".equals(steps.get(Updater.Step.RUN)); }
+
     synchronized Snapshot snapshot() {
         long now = System.nanoTime();
         long elapsed = Math.max(1, now - previousAt);
@@ -103,6 +121,6 @@ final class LauncherSession {
         previousFile = firstKey;
         previousFileBytes = firstBytes;
         return new Snapshot(Map.copyOf(steps), new LinkedHashMap<>(counts), List.copyOf(active.values()),
-            List.copyOf(history), current, release, offline, log, received, verified, reused, speed, fileSpeed);
+            List.copyOf(history), current, release, offline, log, join, received, verified, reused, speed, fileSpeed);
     }
 }
