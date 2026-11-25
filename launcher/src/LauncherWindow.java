@@ -56,6 +56,7 @@ final class LauncherWindow {
 
     void show() {
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
+        frame.setFocusTraversalPolicy(new ContainerOrderFocusTraversalPolicy());
         frame.addWindowListener(new WindowAdapter() {
             @Override public void windowClosing(WindowEvent event) { if (!busy) frame.dispose(); }
         });
@@ -667,6 +668,7 @@ final class LauncherWindow {
             notice = failure.key;
             noticeError = true;
             render();
+            if (settingsPanel != null) settingsPanel.focusInvalidInput(failure.key);
             return;
         }
         PackService.Release selection = null;

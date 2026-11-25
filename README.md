@@ -15,7 +15,7 @@ Use PowerShell 7, Windows x64 JDK 25 including `jpackage`, and Gson 2.14.0 in th
 ./launcher/test.ps1 -ApplicationImage <path-to-built-Gunnertimes-directory>
 ```
 
-The build prints the EXE and portable ZIP. `-Libraries` overrides the library directory and `-Channel` selects a trusted channel file. The repository includes the public channel endpoint and verification key. It does not contain the signing key, Minecraft payloads or configuration from player profiles.
+The build prints the EXE and portable ZIP. Add `-Ui` to the test command on an interactive Windows desktop for keyboard, bilingual settings and preference persistence checks. `-Libraries` overrides the library directory and `-Channel` selects a trusted channel file. The repository includes the public channel endpoint and verification key. It does not contain the signing key, Minecraft payloads or configuration from player profiles.
 
 ## Release and diagnostics
 

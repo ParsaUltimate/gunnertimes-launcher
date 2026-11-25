@@ -10,7 +10,7 @@ import java.util.concurrent.*;
 final class MinecraftFiles {
     static final String VERSION = "26.3";
     static final String LOADER = "0.20.1";
-    static final String LAUNCHER_VERSION = "1.2.0";
+    static final String LAUNCHER_VERSION = "1.2.1";
     private static final String FABRIC_ID = "fabric-loader-" + LOADER + "-" + VERSION;
     private static final String MOJANG_META = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
     private static final String FABRIC_META = "https://meta.fabricmc.net/v2/versions/loader/"

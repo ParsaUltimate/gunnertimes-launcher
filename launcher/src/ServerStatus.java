@@ -3,7 +3,6 @@ import java.io.*;
 import java.net.*;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.*;
-import java.util.List;
 
 final class ServerStatus {
     static final String HOST = "blade.9craft.ir";

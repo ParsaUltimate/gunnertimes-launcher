@@ -36,6 +36,7 @@ final class LauncherSettings {
     private final JButton save;
     private final JButton[] tabs = new JButton[SECTIONS.length];
     private final java.util.ArrayList<JTextField> javaReadouts = new java.util.ArrayList<>();
+    private LaunchOptions.JavaInfo resolvedJava;
     private int section;
 
     LauncherSettings(LauncherWindow ui, Draft initial) {
@@ -239,7 +240,7 @@ final class LauncherSettings {
             action("openLog", () -> withProfile(path -> lastLog(path, false))),
             action("openCrashes", () -> withProfile(path -> ui.open(path.resolve("crash-reports")))));
         area.add(folders);
-        area.add(actions(action("copyDiagnostics", () -> copyDiagnostics(resolved.getText())),
+        area.add(actions(action("copyDiagnostics", this::copyDiagnostics),
             action("resetPreferences", () -> {
                 if (!ui.working() && ui.confirm(ui.t("resetPreferences"), ui.t("resetConfirm"))) {
                     try { ui.acceptSettings(GunnertimesLauncher.defaults(ui.settings().language())); }
@@ -335,13 +336,8 @@ final class LauncherSettings {
             candidate = GunnertimesLauncher.validated(draft.name(), draft.profile(), ui.settings().language(),
                 draft.ram(), opts, false);
         } catch (GunnertimesLauncher.InputError failure) {
-            switchSection(failure.key.equals("invalidRam") ? 3 : 1);
             message(failure.key, "", true);
-            switch (failure.key) {
-                case "invalidRam" -> ram.requestFocusInWindow();
-                case "invalidName" -> name.requestFocusInWindow();
-                default -> profile.requestFocusInWindow();
-            }
+            focusInvalidInput(failure.key);
             return;
         }
         if (!opts.javaMode().equals("custom")) {
@@ -373,6 +369,15 @@ final class LauncherSettings {
         }.execute();
     }
 
+    void focusInvalidInput(String key) {
+        switchSection(key.equals("invalidRam") ? 3 : 1);
+        switch (key) {
+            case "invalidRam" -> ram.requestFocusInWindow();
+            case "invalidName" -> name.requestFocusInWindow();
+            default -> profile.requestFocusInWindow();
+        }
+    }
+
     private void persist(GunnertimesLauncher.Preferences value) {
         try { ui.acceptSettings(value); }
         catch (IOException failure) { message("settingsFailure", failure.toString(), true); }
@@ -396,7 +401,8 @@ final class LauncherSettings {
             @Override protected void done() {
                 try {
                     var info = get();
-                    String resolved = info.executable() + "  ·  " + info.version() + "  ·  " + info.architecture();
+                    resolvedJava = info;
+                    String resolved = info.version() + "  ·  " + info.architecture() + "  ·  " + info.executable();
                     for (JTextField field : javaReadouts) {
                         field.setText(resolved);
                         field.setToolTipText(resolved);
@@ -466,13 +472,12 @@ final class LauncherSettings {
         }
     }
 
-    private void copyDiagnostics(String resolvedJava) {
+    private void copyDiagnostics() {
         // This summary has no username, profile path, raw log, environment variables or machine name.
         String sanitized = "Gunnertimes " + MinecraftFiles.LAUNCHER_VERSION + "\nMinecraft " + MinecraftFiles.VERSION
             + " / Fabric " + MinecraftFiles.LOADER + "\nInstalled: " + ui.installedVersion()
             + "\nAvailable: " + ui.availableVersion() + "\nJava mode: " + ui.settings().options().javaMode()
-            + "\nJava: " + (resolvedJava.contains("  ·  ")
-                ? resolvedJava.substring(resolvedJava.indexOf("  ·  ") + 5) : "unknown")
+            + "\nJava: " + (resolvedJava == null ? "unknown" : resolvedJava.version() + " / " + resolvedJava.architecture())
             + "\nMemory: " + ui.settings().ramGiB() + " GiB\nOS: " + System.getProperty("os.name")
             + " / " + System.getProperty("os.arch");
         Toolkit.getDefaultToolkit().getSystemClipboard().setContents(new StringSelection(sanitized), null);
