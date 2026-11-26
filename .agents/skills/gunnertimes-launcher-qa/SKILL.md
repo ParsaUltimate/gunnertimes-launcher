@@ -33,3 +33,8 @@ The controlled tests cover installation, pinned release, explicit update, interr
 # Recovery Procedures
 
 Use the SHA-verified cache to separate stalled network transfers from launcher defects. Report cached boot evidence accurately. For changes to classpath or runtime discovery, rebuild and test with the packaged Java executable again.
+
+- Verify font coverage and half-space shaping under the packaged Java runtime. Review Help article wrapping, Settings labels, and Pack's table at both 125% and 150%. The mod names and versions should come from hash-verified JAR metadata.
+- Test installs with Java removed from the child process PATH and confirm that the executable starts its bundled Java. Use a clean Windows x64 VM when certifying a machine with no Java installed.
+- Run launcher and pack update tests independently. Use a lower numeric launcher build with the same public key to test stable discovery and the artifact chosen by each distribution. Never use a player profile for destructive recovery tests.
+- Capture only the launcher window or its Swing client area. Screen captures on an active desktop may show another application's content when focus changes, especially across DPI settings. Inspect each image before sharing.

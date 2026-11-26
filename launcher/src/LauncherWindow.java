@@ -22,6 +22,7 @@ final class LauncherWindow {
         RED = new Color(0xFFABA0);
     private enum Page { PLAY, PACK, SETTINGS, HELP }
 
+    private final java.util.function.Consumer<String> copyToClipboard;
     private final JFrame frame = new JFrame("Gunnertimes");
     private final BufferedImage art = loadArt();
     private LauncherText text;
@@ -33,6 +34,10 @@ final class LauncherWindow {
     private LauncherSettings settingsPanel;
     private LauncherSettings.Draft draft;
     private boolean compact;
+    private int helpTopic;
+    private JButton activeHelpTopic, languageButton;
+    private boolean checkingLauncher, updatingLauncher;
+    private LauncherUpdates.Release launcherRelease;
     private boolean checking, catalogReady, serverChecking = true;
     private boolean progressed, minimized;
     private GunnertimesLauncher.Action lastAction;
@@ -50,6 +55,12 @@ final class LauncherWindow {
     private final EnumMap<Updater.Step,JLabel> stages = new EnumMap<>(Updater.Step.class);
 
     LauncherWindow(GunnertimesLauncher.Preferences settings) {
+        this(settings, value -> Toolkit.getDefaultToolkit().getSystemClipboard()
+            .setContents(new StringSelection(value), null));
+    }
+
+    LauncherWindow(GunnertimesLauncher.Preferences settings, java.util.function.Consumer<String> copyToClipboard) {
+        this.copyToClipboard = copyToClipboard;
         this.settings = settings;
         text = new LauncherText(settings.language());
     }
@@ -58,7 +69,7 @@ final class LauncherWindow {
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         frame.setFocusTraversalPolicy(new ContainerOrderFocusTraversalPolicy());
         frame.addWindowListener(new WindowAdapter() {
-            @Override public void windowClosing(WindowEvent event) { if (!busy) frame.dispose(); }
+            @Override public void windowClosing(WindowEvent event) { if (!busy && !updatingLauncher) frame.dispose(); }
         });
         frame.setMinimumSize(new Dimension(690, 550));
         frame.setSize(1270, 805);
@@ -76,6 +87,7 @@ final class LauncherWindow {
         frame.setVisible(true);
         lookup(true);
         probeServer();
+        checkLauncher(false);
         var timer = new Timer(650, event -> {
             if (!frame.isDisplayable()) ((Timer) event.getSource()).stop();
             else if (busy) {
@@ -102,10 +114,15 @@ final class LauncherWindow {
             case PACK -> packPage();
             case SETTINGS -> settingsPage();
             case HELP -> helpPage();
-        }, BorderLayout.PAGE_START);
-        pageScroll = scroll(content);
-        pageScroll.getVerticalScrollBar().setUnitIncrement(20);
-        shell.add(pageScroll, BorderLayout.CENTER);
+        }, page == Page.HELP ? BorderLayout.CENTER : BorderLayout.PAGE_START);
+        if (page == Page.HELP) {
+            pageScroll = null;
+            shell.add(content, BorderLayout.CENTER);
+        } else {
+            pageScroll = scroll(content);
+            pageScroll.getVerticalScrollBar().setUnitIncrement(20);
+            shell.add(pageScroll, BorderLayout.CENTER);
+        }
         if (page == Page.PLAY) shell.add(packStrip(), BorderLayout.PAGE_END);
         text.orient(shell);
         frame.setContentPane(shell);
@@ -132,12 +149,15 @@ final class LauncherWindow {
         var mark = label("", 20, true, GOLD);
         mark.setIcon(navigationIcon(Page.PACK));
         brand.add(mark, BorderLayout.LINE_START);
-        brand.add(label("Gunnertimes", compact ? 19 : 24, true, TEXT), BorderLayout.CENTER);
+        var wordmark = panel(new GridLayout(compact ? 1 : 2, 1, 0, -3), null);
+        wordmark.add(label("Gunnertimes", compact ? 19 : 27, true, TEXT));
+        if (!compact) wordmark.add(label("MINECRAFT MODPACK LAUNCHER", 10, true, MUTED));
+        brand.add(wordmark, BorderLayout.CENTER);
         bar.add(brand, BorderLayout.LINE_START);
         var tabs = panel(new FlowLayout(FlowLayout.CENTER, compact ? 2 : 8, 0), RAIL);
         for (Page target : Page.values()) {
             var action = button(t(pageKey(target)), false);
-            if (!compact) action.setIcon(navigationIcon(target));
+            if (!compact) action.setIcon(target == Page.PLAY ? new UtilityIcon("home") : navigationIcon(target));
             action.setIconTextGap(7);
             action.setBackground(page == target ? new Color(0x47311C) : RAIL);
             action.setForeground(page == target ? GOLD : TEXT);
@@ -153,8 +173,31 @@ final class LauncherWindow {
             tabs.add(action);
         }
         bar.add(tabs, BorderLayout.CENTER);
-        var language = button(t("switchLanguage"), false);
-        language.addActionListener(event -> changeLanguage(text.rtl ? "en" : "fa"));
+        var language = button("", false);
+        languageButton = language;
+        language.setIcon(new UtilityIcon("globe"));
+        language.setToolTipText(t("language"));
+        language.getAccessibleContext().setAccessibleName(t("language"));
+        language.putClientProperty("outlined", true);
+        language.addActionListener(event -> {
+            var menu = new JPopupMenu();
+            var group = new ButtonGroup();
+            String[] codes = {"fa", "en"};
+            String[] names = {"فارسی", "English"};
+            for (int i = 0; i < codes.length; i++) {
+                String code = codes[i];
+                var choice = new JRadioButtonMenuItem(names[i], settings.language().equals(code));
+                choice.setBackground(PANEL);
+                choice.setForeground(TEXT);
+                choice.setFont(code.equals("fa") ? PersianTypography.control(15) : new Font("Segoe UI", Font.PLAIN, 15));
+                choice.addActionListener(selected -> changeLanguage(code));
+                group.add(choice);
+                menu.add(choice);
+            }
+            text.orient(menu);
+            menu.show(language, text.rtl ? 0 : language.getWidth() - menu.getPreferredSize().width, language.getHeight());
+            MenuSelectionManager.defaultManager().setSelectedPath(new MenuElement[]{menu, (MenuElement) menu.getComponent(text.rtl ? 0 : 1)});
+        });
         bar.add(language, BorderLayout.LINE_END);
         return bar;
     }
@@ -191,6 +234,7 @@ final class LauncherWindow {
         join.setToolTipText(t("compat." + compatibility().name()));
         join.addActionListener(event -> perform(GunnertimesLauncher.Action.JOIN));
         var update = button(t("updatePack"), false);
+        downloadStyle(update);
         update.putClientProperty("outlined", true);
         update.setFont(font(compact ? 13 : 15, true));
         update.setEnabled(!busy && canUpdate());
@@ -296,76 +340,158 @@ final class LauncherWindow {
     }
 
     private JPanel packPage() {
-        var body = stack(BG, 13);
-        body.add(label(t("navPack"), 26, true, TEXT));
+        var body = stack(BG, 15);
+        body.add(utilityTitle("officialMods", compact ? 33 : 43));
+        body.add(label(t("packIntro"), 15, false, MUTED));
+        var toolbar = outline(panel(new BorderLayout(12, 0), PANEL), 13);
+        var summary = panel(new FlowLayout(FlowLayout.LEADING, 14, 3), PANEL);
+        summary.add(label(t("installedVersion") + "  " + (installed == null ? t("none") : ltr(installed.version())),
+            14, true, TEXT));
+        String health = !profileError.isEmpty() ? t("failure.CHECK") : checking ? t("healthChecking")
+            : inspection == null ? t("unknown") : t(inspection.healthy() ? "healthyPack" : "issuesFound");
+        summary.add(label(t("fileHealth") + "  " + health, 13, true,
+            inspection != null && inspection.healthy() && !checking ? GREEN : GOLD));
+        toolbar.add(summary, BorderLayout.CENTER);
+
+        var actions = panel(new FlowLayout(FlowLayout.TRAILING, 7, 0), PANEL);
+        var verify = button(t("verifyPack"), true);
+        verify.setIcon(new UtilityIcon("check", BG));
+        verify.setFont(controlFont(compact ? 14 : 18));
+        verify.setEnabled(installed != null && !busy && !checking);
+        verify.addActionListener(event -> verify());
+        actions.add(verify);
+        var repair = button(t("repairPack"), false);
+        repair.putClientProperty("outlined", true);
+        repair.setIcon(new UtilityIcon("repair"));
+        repair.setFont(controlFont(compact ? 14 : 18));
+        repair.setEnabled(installed != null && inspection != null && !inspection.healthy() && !busy && !checking);
+        repair.addActionListener(event -> perform(GunnertimesLauncher.Action.REPAIR));
+        actions.add(repair);
         if (!profileError.isEmpty()) {
             var error = button(t("details"), false);
             error.addActionListener(event -> detailDialog(t("failure.CHECK"), profileError));
-            body.add(error);
+            actions.add(error);
         }
-        var commands = panel(new FlowLayout(FlowLayout.LEADING, 7, 0), BG);
-        var verify = button(t("verifyPack"), false);
-        verify.setEnabled(installed != null && !busy && !checking);
-        verify.addActionListener(event -> verify());
-        commands.add(verify);
-        var repair = button(t("repairPack"), false);
-        repair.setEnabled(installed != null && inspection != null && !inspection.healthy() && !busy);
-        repair.addActionListener(event -> perform(GunnertimesLauncher.Action.REPAIR));
-        commands.add(repair);
-        var check = button(t("checkNow"), false);
-        check.setEnabled(!checking);
-        check.addActionListener(event -> lookup(true));
-        commands.add(check);
-        body.add(commands);
-        if (inspection != null) body.add(label(inspection.healthy() ? t("verifiedPack") : t("issuesFound"),
-            14, true, inspection.healthy() ? GREEN : GOLD));
-        var release = installed != null ? installed : catalog.available();
-        if (release == null) {
+        toolbar.add(actions, compact ? BorderLayout.PAGE_END : BorderLayout.LINE_END);
+        body.add(toolbar);
+
+        var official = installed != null ? installed : catalog.available();
+        if (official == null) {
             body.add(wrapped(t(checking ? "checkingRelease" : "releaseUnavailable")));
             return body;
         }
-        body.add(label(ltr(release.version()), 14, false, GOLD));
+        if (installed == null) body.add(label(t("availableVersion") + "  " + ltr(official.version()), 13, false, MUTED));
         var searchField = field(search, 25);
-        body.add(labeled(t("searchMods"), searchField, searchField));
-        var model = new javax.swing.table.DefaultTableModel(new Object[]{t("file"), t("modId"), t("fileStatus")}, 0) {
+        var searchRow = panel(new FlowLayout(FlowLayout.LEADING, 0, 0), BG);
+        searchRow.add(labeled(t("searchMods"), searchField, searchField));
+        body.add(searchRow);
+        var model = new javax.swing.table.DefaultTableModel(new Object[]{t("modName"), t("modVersion"), t("fileStatus")}, 0) {
             @Override public boolean isCellEditable(int row, int column) { return false; }
         };
-        var table = new JTable(model);
+        record OfficialRow(String file, String id, PackService.Condition condition) {}
+        var rows = new java.util.ArrayList<OfficialRow>();
+        var inspected = new java.util.HashMap<String, PackService.Item>();
+        if (inspection != null) for (var item : inspection.items()) inspected.put(item.entry().path(), item);
+        for (var entry : official.pack().files()) {
+            if (!entry.path().startsWith("mods/")) continue;
+            var item = inspected.get(entry.path());
+            String file = entry.path().substring(5);
+            String id = entry.modId() == null ? "" : entry.modId();
+            String name = item != null && !item.modName().isBlank() ? item.modName() : id.isBlank() ? file : id;
+            String version = item != null && !item.modVersion().isBlank() ? item.modVersion() : "—";
+            var condition = item == null ? null : item.condition();
+            model.addRow(new Object[]{name, version, condition == null ? t("unknown") : t("condition." + condition.name())});
+            rows.add(new OfficialRow(file, id, condition));
+        }
+
+        var table = new JTable(model) {
+            @Override public String getToolTipText(java.awt.event.MouseEvent event) {
+                int row = rowAtPoint(event.getPoint());
+                if (row < 0) return null;
+                var entry = rows.get(convertRowIndexToModel(row));
+                return entry.id().isEmpty() ? entry.file() : entry.file() + "  ·  " + entry.id();
+            }
+        };
+        javax.swing.ToolTipManager.sharedInstance().registerComponent(table);
+        table.getAccessibleContext().setAccessibleName(t("officialMods"));
         table.setBackground(PANEL);
         table.setForeground(TEXT);
         table.setGridColor(EDGE);
-        table.setSelectionBackground(new Color(0x5B411F));
+        table.setShowVerticalLines(false);
+        table.setSelectionBackground(new Color(0x51391D));
         table.setSelectionForeground(TEXT);
-        table.setRowHeight(27);
-        table.setFont(font(13, false));
-        table.getTableHeader().setBackground(RAIL);
-        table.getTableHeader().setForeground(TEXT);
-        table.getTableHeader().setReorderingAllowed(false);
-        table.getColumnModel().getColumn(0).setPreferredWidth(440);
-        table.getColumnModel().getColumn(1).setPreferredWidth(165);
-        table.getColumnModel().getColumn(2).setPreferredWidth(150);
-        for (var entry : release.pack().files()) {
-            if (!entry.path().startsWith("mods/")) continue;
-            var item = inspection == null ? null : inspection.items().stream()
-                .filter(candidate -> candidate.entry().path().equals(entry.path())).findFirst().orElse(null);
-            model.addRow(new Object[]{ltr(entry.path().substring(5)), ltr(entry.modId() == null ? "" : entry.modId()),
-                item == null ? t("unknown") : t("condition." + item.condition().name())});
-        }
+        table.setRowHeight(compact ? 43 : 54);
+        table.setFont(font(15, false));
+        var renderer = new javax.swing.table.DefaultTableCellRenderer() {
+            @Override public Component getTableCellRendererComponent(JTable source, Object value,
+                    boolean selected, boolean focus, int row, int column) {
+                super.getTableCellRendererComponent(source, value, selected, focus, row, column);
+                putClientProperty("html.disable", true);
+                setBorder(new EmptyBorder(0, 13, 0, 13));
+                setHorizontalAlignment(column == 0 ? (text.rtl ? RIGHT : LEFT) : CENTER);
+                setText(column == 1 ? ltr(String.valueOf(value)) : String.valueOf(value));
+                setFont(column == 0 ? controlFont(compact ? 15 : 19) : font(compact ? 14 : 17, false));
+                setIcon(column == 0 ? navigationIcon(Page.PACK) : null);
+                setIconTextGap(10);
+                if (!selected) {
+                    var item = rows.get(source.convertRowIndexToModel(row));
+                    setForeground(column == 2 && item.condition() != null
+                        ? item.condition() == PackService.Condition.VERIFIED ? GREEN : GOLD : TEXT);
+                }
+                if (focus) setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(GOLD), getBorder()));
+                return this;
+            }
+        };
+        table.setDefaultRenderer(Object.class, renderer);
+        var header = table.getTableHeader();
+        header.setBackground(RAIL);
+        header.setForeground(TEXT);
+        header.setFont(controlFont(15));
+        header.setReorderingAllowed(false);
+        header.setPreferredSize(new Dimension(0, compact ? 44 : 52));
+        header.setDefaultRenderer(new javax.swing.table.DefaultTableCellRenderer() {
+            @Override public Component getTableCellRendererComponent(JTable source, Object value,
+                    boolean selected, boolean focus, int row, int column) {
+                super.getTableCellRendererComponent(source, value, selected, focus, row, column);
+                setBackground(RAIL);
+                setForeground(TEXT);
+                setFont(controlFont(15));
+                setHorizontalAlignment(column == 0 ? (text.rtl ? RIGHT : LEFT) : CENTER);
+                setBorder(new EmptyBorder(0, 13, 0, 13));
+                return this;
+            }
+        });
+        table.getColumnModel().getColumn(0).setPreferredWidth(490);
+        table.getColumnModel().getColumn(1).setPreferredWidth(140);
+        table.getColumnModel().getColumn(2).setPreferredWidth(180);
         var sorter = new javax.swing.table.TableRowSorter<>(model);
         table.setRowSorter(sorter);
+        var empty = label(t("noMatchingMods"), 14, false, MUTED);
         Runnable filter = () -> {
             search = searchField.getText();
-            sorter.setRowFilter(javax.swing.RowFilter.regexFilter("(?i)" + java.util.regex.Pattern.quote(search), 0, 1));
+            String query = search.strip().toLowerCase(java.util.Locale.ROOT);
+            sorter.setRowFilter(new javax.swing.RowFilter<javax.swing.table.DefaultTableModel, Integer>() {
+                @Override public boolean include(Entry<? extends javax.swing.table.DefaultTableModel, ? extends Integer> row) {
+                    var entry = rows.get(row.getIdentifier());
+                    return (row.getStringValue(0) + " " + row.getStringValue(1) + " " + entry.id() + " " + entry.file())
+                        .toLowerCase(java.util.Locale.ROOT).contains(query);
+                }
+            });
+            empty.setVisible(table.getRowCount() == 0);
         };
         searchField.getDocument().addDocumentListener(new javax.swing.event.DocumentListener() {
             public void insertUpdate(javax.swing.event.DocumentEvent event) { filter.run(); }
             public void removeUpdate(javax.swing.event.DocumentEvent event) { filter.run(); }
             public void changedUpdate(javax.swing.event.DocumentEvent event) { filter.run(); }
         });
-        filter.run();
         var list = scroll(table);
-        list.setPreferredSize(new Dimension(500, 380));
+        list.setBorder(new RoundedSurface(11, RAIL, EDGE, 4));
+        list.setCorner(JScrollPane.UPPER_TRAILING_CORNER, panel(new BorderLayout(), RAIL));
+        list.setBackground(RAIL);
+        list.setPreferredSize(new Dimension(500, Math.clamp(frame.getHeight() - 430, 210, 505)));
         body.add(list);
+        body.add(empty);
+        filter.run();
         return body;
     }
 
@@ -430,7 +556,7 @@ final class LauncherWindow {
         details = technical(new JTextArea(7, 40));
         details.setBackground(BG);
         details.setForeground(TEXT);
-        details.setFont(new Font(Font.MONOSPACED, Font.PLAIN, 12));
+        details.setFont(text.rtl ? font(13, false) : new Font(Font.MONOSPACED, Font.PLAIN, 12));
         details.setLineWrap(true);
         details.setEditable(false);
         details.setBorder(new EmptyBorder(8, 8, 8, 8));
@@ -453,33 +579,104 @@ final class LauncherWindow {
     }
 
     private JPanel helpPage() {
-        var body = stack(BG, 12);
-        body.add(label(t("helpSubtitle"), 15, false, MUTED));
-        body.add(guide("guideStart", "guideStartBody"));
-        body.add(guide("guideFolder", "guideFolderBody"));
-        var examples = guide("guideExamples", null);
-        examples.add(label(t("guideDefault"), 13, true, MUTED));
-        examples.add(example("%LOCALAPPDATA%\\Gunnertimes\\profiles\\Gunnertimes"));
-        examples.add(label(t("guideExisting"), 13, true, MUTED));
-        examples.add(example("%APPDATA%\\.minecraft\\versions\\Goharian New Server"));
-        body.add(examples);
-        body.add(guide("guideActions", "guideActionsBody"));
-        body.add(guide("guideFix", "guideFixBody"));
-        body.add(guide("guideLogs", "guideLogsBody"));
+        var body = panel(new BorderLayout(0, 15), BG);
+        var header = stack(BG, 14);
+        header.add(utilityTitle("helpTitle", compact ? 33 : 40));
+        var rule = new JSeparator();
+        rule.setForeground(EDGE);
+        header.add(rule);
+        body.add(header, BorderLayout.PAGE_START);
+        var layout = panel(new BorderLayout(18, 0), BG);
+        var menu = stack(BG, 4);
+        String[] topics = {"guideFolder", "guideStart", "guideActions", "guideFix", "guideLogs"};
+        var article = stack(BG, 15);
+        article.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createMatteBorder(
+            0, text.rtl ? 0 : 1, 0, text.rtl ? 1 : 0, EDGE), new EmptyBorder(10, 20, 23, 20)));
+        String[] icons = {"folder", "play", "server", "download", "document"};
+        for (int i = 0; i < topics.length; i++) {
+            int topic = i;
+            String navLabel = t(i == 2 ? "guidePlayNav" : topics[i]);
+            var button = button(navLabel, false);
+            button.setHorizontalAlignment(SwingConstants.LEADING);
+            button.setIcon(new UtilityIcon(icons[i]));
+            button.setIconTextGap(10);
+            button.setFont(controlFont(compact ? 13 : 17));
+            button.setBackground(i == helpTopic ? new Color(0x47311C) : BG);
+            if (i == helpTopic) {
+                button.putClientProperty("outlined", true);
+                button.putClientProperty("selected", true);
+                activeHelpTopic = button;
+            }
+            button.setToolTipText(t(topics[i]));
+            button.addActionListener(event -> {
+                helpTopic = topic;
+                render();
+                focusHelpTopic();
+            });
+            menu.add(button);
+            if (i < topics.length - 1) menu.add(new JSeparator());
+        }
+        String topic = topics[helpTopic];
+        article.add(label(t(topic), compact ? 24 : 34, true, TEXT));
+        var description = wrapped(t(topic + "Body"));
+        description.setFont(font(compact ? 15 : 19, false));
+        description.setBackground(BG);
+        article.add(description);
+        if (helpTopic == 0) {
+            article.add(label(t("guideDefault"), 14, true, MUTED));
+            article.add(copyPath("%LOCALAPPDATA%\\Gunnertimes\\profiles\\Gunnertimes"));
+            article.add(label(t("guideExisting"), 14, true, MUTED));
+            article.add(copyPath("%APPDATA%\\.minecraft\\versions\\Goharian New Server"));
+            var divider = new JSeparator();
+            divider.setForeground(EDGE);
+            article.add(divider);
+            article.add(label(t("guideLogs"), 20, true, TEXT));
+            article.add(wrapped(t("logsHint")));
+        }
+        if (helpTopic == 0 || helpTopic == 4) {
+            var row = panel(new FlowLayout(FlowLayout.LEADING, 0, 0), PANEL);
+            var logs = button(t("openLogs"), false);
+            logs.putClientProperty("outlined", true);
+            logs.setIcon(new UtilityIcon("folder"));
+            logs.addActionListener(event -> {
+                try { open(GunnertimesLauncher.profilePath(settings.profile()).resolve("logs")); }
+                catch (GunnertimesLauncher.InputError failure) { notifyUser(failure.key, "", true); }
+            });
+            row.add(logs);
+            article.add(row);
+        }
+        var topicsViewport = new PageViewport();
+        topicsViewport.add(menu, BorderLayout.PAGE_START);
+        var articleViewport = new PageViewport();
+        articleViewport.add(article, BorderLayout.PAGE_START);
+        var topicScroll = scroll(topicsViewport);
+        topicScroll.setPreferredSize(new Dimension(compact ? 192 : 318, 0));
+        topicScroll.getAccessibleContext().setAccessibleName(t("helpTopics"));
+        var articleScroll = scroll(articleViewport);
+        articleScroll.getAccessibleContext().setAccessibleName(t(topic));
+        layout.add(topicScroll, BorderLayout.LINE_START);
+        layout.add(articleScroll, BorderLayout.CENTER);
+        body.add(layout, BorderLayout.CENTER);
         return body;
     }
 
-    private JPanel guide(String title, String body) {
-        var guide = card(7);
-        guide.add(label(t(title), 16, true, GOLD));
-        if (body != null) guide.add(wrapped(t(body)));
-        return guide;
-    }
-
-    private JTextField example(String path) {
-        var example = field(path, 40);
-        example.setEditable(false);
-        return example;
+    private JPanel copyPath(String path) {
+        var row = panel(new BorderLayout(8, 0), PANEL);
+        var value = field(path, 24);
+        value.setEditable(false);
+        value.setText(path);
+        value.setCaretPosition(0);
+        value.setToolTipText(path);
+        value.getAccessibleContext().setAccessibleName(path);
+        var copy = button(t("copyPath"), false);
+        copy.putClientProperty("outlined", true);
+        copy.addActionListener(event -> {
+            copyToClipboard.accept(path);
+            copy.setText(t("copied"));
+        });
+        row.add(value, BorderLayout.CENTER);
+        row.add(copy, BorderLayout.LINE_END);
+        return row;
     }
 
     private void changeLanguage(String language) {
@@ -491,12 +688,23 @@ final class LauncherWindow {
             settings = translated;
             text = new LauncherText(language);
             render();
+            if (page == Page.HELP) focusHelpTopic();
+            else languageButton.requestFocusInWindow();
         } catch (IOException failure) {
             notifyUser("settingsFailure", failure.toString(), true);
         }
     }
 
     void language(String value) { changeLanguage(value); }
+
+    private void focusHelpTopic() {
+        SwingUtilities.invokeLater(() -> {
+            if (page == Page.HELP && activeHelpTopic != null) {
+                activeHelpTopic.scrollRectToVisible(new Rectangle(activeHelpTopic.getSize()));
+                activeHelpTopic.requestFocusInWindow();
+            }
+        });
+    }
     boolean working() { return busy; }
     boolean isPersian() { return text.rtl; }
     JFrame frame() { return frame; }
@@ -512,6 +720,95 @@ final class LauncherWindow {
     }
     boolean checking() { return checking; }
     void checkNow() { lookup(true); probeServer(); }
+
+    void checkLauncher(boolean manual) {
+        if (checkingLauncher || updatingLauncher) return;
+        if (manual && launcherRelease != null) {
+            offerLauncherUpdate();
+            return;
+        }
+        checkingLauncher = true;
+        new SwingWorker<LauncherUpdates.Release, Void>() {
+            protected LauncherUpdates.Release doInBackground() throws Exception { return LauncherUpdates.check(); }
+            protected void done() {
+                checkingLauncher = false;
+                if (!frame.isDisplayable()) return;
+                try {
+                    launcherRelease = get();
+                    if (launcherRelease != null && !busy) offerLauncherUpdate();
+                    else if (manual && launcherRelease == null)
+                        JOptionPane.showMessageDialog(frame, t("launcherCurrent"), t("launcherUpdate"), JOptionPane.INFORMATION_MESSAGE);
+                } catch (Exception failure) {
+                    if (manual) detailDialog(t("launcherCheckFailed"), failure.toString());
+                }
+            }
+        }.execute();
+    }
+
+    private void offerLauncherUpdate() {
+        if (updatingLauncher || busy || launcherRelease == null) return;
+        try {
+            var asset = launcherRelease.artifact(LauncherUpdates.type());
+            var info = stack(PANEL, 8);
+            info.add(label(t("launcherVersionAvailable") + " " + launcherRelease.version() + "  ·  " + bytes(asset.size()),
+                17, true, TEXT));
+            info.add(dialogText(launcherRelease.notes()));
+            text.orient(info);
+            String[] actions = {t("updateRestart"), t("updateLater")};
+            int choice = JOptionPane.showOptionDialog(frame, info, t("launcherUpdate"), JOptionPane.DEFAULT_OPTION,
+                JOptionPane.INFORMATION_MESSAGE, null, actions, actions[1]);
+            if (choice == 0) applyLauncherUpdate(asset);
+        } catch (IOException failure) {
+            detailDialog(t("launcherCheckFailed"), failure.toString());
+        }
+    }
+
+    private void applyLauncherUpdate(LauncherUpdates.Artifact asset) {
+        updatingLauncher = true;
+        var progress = new JProgressBar(0, 1000);
+        progress.setIndeterminate(true);
+        progress.setStringPainted(true);
+        progress.setString(t("launcherDownloading"));
+        var dialog = new JDialog(frame, t("launcherUpdate"), Dialog.ModalityType.APPLICATION_MODAL);
+        dialog.setDefaultCloseOperation(WindowConstants.DO_NOTHING_ON_CLOSE);
+        var cancel = button(t("cancel"), false);
+        var body = stack(PANEL, 12);
+        body.setBorder(new EmptyBorder(20, 20, 20, 20));
+        body.add(progress);
+        body.add(cancel);
+        dialog.setContentPane(body);
+        dialog.setSize(420, 144);
+        dialog.setLocationRelativeTo(frame);
+        var worker = new SwingWorker<Path, Updater.Progress>() {
+            protected Path doInBackground() throws Exception { return LauncherUpdates.download(asset, this::publish); }
+            protected void process(java.util.List<Updater.Progress> events) {
+                var change = events.getLast();
+                if (change.status() == Updater.Status.TRANSFER && change.count() >= 0) {
+                    progress.setIndeterminate(false);
+                    progress.setValue((int) Math.min(1000, 1000 * change.count() / asset.size()));
+                    progress.setString(bytes(change.count()) + " / " + bytes(asset.size()));
+                }
+            }
+            protected void done() {
+                dialog.dispose();
+                updatingLauncher = false;
+                if (isCancelled()) return;
+                Path payload = null;
+                try {
+                    payload = get();
+                    LauncherUpdates.handoff(asset, payload, text.rtl);
+                    frame.dispose();
+                    System.exit(0);
+                } catch (Exception failure) {
+                    if (payload != null) try { Files.deleteIfExists(payload); } catch (IOException ignored) {}
+                    detailDialog(t("launcherUpdateFailed"), failure.toString());
+                }
+            }
+        };
+        cancel.addActionListener(event -> worker.cancel(true));
+        worker.execute();
+        dialog.setVisible(true);
+    }
     String checkError() { return catalogError; }
 
     void acceptSettings(GunnertimesLauncher.Preferences value) throws IOException {
@@ -732,12 +1029,25 @@ final class LauncherWindow {
     boolean confirm(String title, String description) {
         var contents = dialogText(description);
         Object[] choices = {t("continue"), t("cancel")};
-        return JOptionPane.showOptionDialog(frame, contents, title, JOptionPane.OK_CANCEL_OPTION,
-            JOptionPane.QUESTION_MESSAGE, null, choices, choices[1]) == 0;
+        var pane = new JOptionPane(contents, JOptionPane.QUESTION_MESSAGE, JOptionPane.OK_CANCEL_OPTION,
+            null, choices, choices[1]);
+        var dialog = pane.createDialog(frame, title);
+        text.orient(dialog);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
+        dialog.setVisible(true);
+        dialog.dispose();
+        return choices[0].equals(pane.getValue());
     }
 
     void detailDialog(String title, String description) {
-        JOptionPane.showMessageDialog(frame, dialogText(description), title, JOptionPane.INFORMATION_MESSAGE);
+        var pane = new JOptionPane(dialogText(description), JOptionPane.INFORMATION_MESSAGE);
+        var dialog = pane.createDialog(frame, title);
+        text.orient(dialog);
+        dialog.pack();
+        dialog.setLocationRelativeTo(frame);
+        dialog.setVisible(true);
+        dialog.dispose();
     }
 
     private JScrollPane dialogText(String message) {
@@ -911,11 +1221,32 @@ final class LauncherWindow {
     private static String ltr(String value) { return "\u2066" + value + "\u2069"; }
 
     Font font(int size, boolean bold) {
-        return new Font(text.rtl ? "Tahoma" : "Segoe UI", bold ? Font.BOLD : Font.PLAIN, size);
+        return text.rtl ? (bold ? PersianTypography.heading(size) : PersianTypography.body(size))
+            : new Font("Segoe UI", bold ? Font.BOLD : Font.PLAIN, size);
+    }
+
+    Font controlFont(int size) {
+        return text.rtl ? PersianTypography.control(size) : font(size, true);
+    }
+
+    JPanel utilityTitle(String key, int size) {
+        var row = panel(new BorderLayout(11, 0), null);
+        var accent = panel(new BorderLayout(), GOLD);
+        accent.setPreferredSize(new Dimension(4, 1));
+        row.add(accent, BorderLayout.LINE_START);
+        row.add(label(t(key), size, true, TEXT), BorderLayout.CENTER);
+        return row;
+    }
+
+    static JPanel outline(JPanel surface, int padding) {
+        surface.setOpaque(false);
+        surface.setBorder(new RoundedSurface(12, surface.getBackground(), EDGE, padding));
+        return surface;
     }
 
     JLabel label(String title, int size, boolean bold, Color color) {
         var label = new JLabel(title, SwingConstants.LEADING);
+        label.putClientProperty("html.disable", true);
         label.setFont(font(size, bold));
         label.setForeground(color);
         return label;
@@ -969,7 +1300,9 @@ final class LauncherWindow {
                 g.setColor(fill);
                 g.fillRoundRect(0, 0, getWidth(), getHeight(), 11, 11);
                 if (Boolean.TRUE.equals(getClientProperty("outlined"))) {
-                    g.setColor(isEnabled() ? GOLD : new Color(0x806748));
+                    boolean selected = Boolean.TRUE.equals(getClientProperty("selected"));
+                    g.setColor(!isEnabled() ? EDGE : selected ? GOLD : getClientProperty("actionColor") instanceof Color color
+                        ? color : new Color(0x727078));
                     g.setStroke(new BasicStroke(1.7f));
                     g.drawRoundRect(1, 1, getWidth() - 3, getHeight() - 3, 11, 11);
                 }
@@ -986,9 +1319,21 @@ final class LauncherWindow {
         button.setBorder(new EmptyBorder(9, 12, 9, 12));
         button.setBackground(accent ? GOLD : PANEL);
         button.setForeground(accent ? BG : TEXT);
-        button.setFont(font(14, true));
+        button.setFont(controlFont(14));
         button.setCursor(Cursor.getPredefinedCursor(Cursor.HAND_CURSOR));
         return button;
+    }
+
+    void downloadStyle(JButton action) {
+        action.putClientProperty("actionColor", new Color(0x82BAFF));
+        action.putClientProperty("outlined", true);
+        action.setBackground(new Color(0x1B3654));
+    }
+
+    void removalStyle(JButton action) {
+        action.putClientProperty("actionColor", new Color(0xF29D9D));
+        action.putClientProperty("outlined", true);
+        action.setBackground(new Color(0x47272D));
     }
 
     JTextField field(String value, int columns) {
@@ -998,8 +1343,8 @@ final class LauncherWindow {
         input.setCaretColor(GOLD);
         input.setSelectionColor(new Color(0x65523D));
         input.setBackground(BG);
-        input.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(EDGE),
-            new EmptyBorder(8, 10, 8, 10)));
+        input.setOpaque(false);
+        input.setBorder(new RoundedSurface(9, BG, EDGE, 8));
         return input;
     }
 
@@ -1040,10 +1385,40 @@ final class LauncherWindow {
     static JPanel stack(Color color, int gap) { return panel(new Vertical(gap), color); }
 
     static JPanel card(int gap) {
-        var panel = stack(PANEL, gap);
-        panel.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createLineBorder(EDGE),
-            new EmptyBorder(15, 17, 15, 17)));
-        return panel;
+        return outline(stack(PANEL, gap), 15);
+    }
+
+    private static final class RoundedSurface extends javax.swing.border.AbstractBorder {
+        private final int radius, padding;
+        private final Color fill, stroke;
+
+        RoundedSurface(int radius, Color fill, Color stroke, int padding) {
+            this.radius = radius;
+            this.fill = fill;
+            this.stroke = stroke;
+            this.padding = padding;
+        }
+
+        @Override public Insets getBorderInsets(Component component) {
+            return new Insets(padding, padding, padding, padding);
+        }
+
+        @Override public void paintBorder(Component component, Graphics graphics, int x, int y, int width, int height) {
+            var g = (Graphics2D) graphics.create();
+            g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+            g.setColor(fill);
+            if (component instanceof JTextField) {
+                var area = new java.awt.geom.Area(new java.awt.geom.RoundRectangle2D.Double(x, y, width, height, radius, radius));
+                area.subtract(new java.awt.geom.Area(new Rectangle(x + padding, y + padding,
+                    Math.max(0, width - 2 * padding), Math.max(0, height - 2 * padding))));
+                g.fill(area);
+            } else {
+                g.fillRoundRect(x, y, width, height, radius, radius);
+            }
+            g.setColor(component.isFocusOwner() ? GOLD : stroke);
+            g.drawRoundRect(x, y, width - 1, height - 1, radius, radius);
+            g.dispose();
+        }
     }
 
     static JScrollPane scroll(JComponent value) {

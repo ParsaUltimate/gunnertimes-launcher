@@ -10,10 +10,39 @@ import java.util.zip.*;
 final class LauncherContractTest {
     private static final Updater.ProgressSink SILENT = ignored -> {};
 
+    private static void launcherReleaseTests(Path fixture, KeyPair key) throws Exception {
+        require(Arrays.compare(LauncherUpdates.parts("1.10.0"), LauncherUpdates.parts("1.9.9")) > 0,
+            "launcher uses numeric versions");
+        try {
+            LauncherUpdates.parts("1.10.0-rc.1");
+            throw new AssertionError("Pre-release accepted");
+        } catch (IllegalArgumentException expected) {}
+        Path payload = Files.writeString(fixture.resolve("launcher-fixture.jar"), "verified update");
+        var assets = new ArrayList<LauncherUpdates.Artifact>();
+        for (var type : LauncherUpdates.Type.values()) {
+            assets.add(new LauncherUpdates.Artifact(type, type.filename, Files.size(payload),
+                LauncherUpdates.assetUrl("1.10.0", type), LauncherUpdates.hash(payload)));
+        }
+        var release = new LauncherUpdates.Release("1.10.0", "Plain release notes.", assets);
+        String notes = LauncherUpdates.signedNotes(release, key.getPrivate());
+        var verified = LauncherUpdates.verifyNotes(notes, key.getPublic());
+        require(release.equals(verified), "round-trip signed launcher manifest");
+        var wrongKey = KeyPairGenerator.getInstance("Ed25519").generateKeyPair().getPublic();
+        expectIo(() -> LauncherUpdates.verifyNotes(notes, wrongKey));
+        var artifact = verified.artifact(LauncherUpdates.Type.PORTABLE);
+        LauncherUpdates.verifyPayload(artifact, payload);
+        Files.writeString(payload, "modified update");
+        expectIo(() -> LauncherUpdates.verifyPayload(artifact, payload));
+        Files.writeString(payload, "partial");
+        expectIo(() -> LauncherUpdates.verifyPayload(artifact, payload));
+        System.out.println("PASS: launcher update version, signatures, asset selection, bad SHA-512 and truncated download rejection.");
+    }
+
     public static void main(String[] args) throws Exception {
         Path fixture = Files.createTempDirectory("gunnertimes-contract-");
         Path profile = fixture.resolve("Profile with spaces پروفایل");
         var key = KeyPairGenerator.getInstance("Ed25519").generateKeyPair();
+        launcherReleaseTests(fixture, key);
         var config = new Updater.Config(fixture.resolve("manifest.json").toUri().toString(),
             Base64.getEncoder().encodeToString(key.getPublic().getEncoded()));
         var service = new PackService(fixture, config);
@@ -32,6 +61,8 @@ final class LauncherContractTest {
         require(service.installed(profile).version().equals("1.6.2"), "first install pins signed release");
         var healthy = service.inspect(profile, service.installed(profile), SILENT);
         require(healthy.healthy(), "verified installation");
+        require(healthy.items().getFirst().modName().equals("fixture") &&
+            healthy.items().getFirst().modVersion().equals("one"), "display metadata comes from verified JAR");
         var officialCheck = new PackService.Check(second, Instant.now(), false, false, "");
         require(ServerStatus.compatibility(officialCheck, first.version()) == ServerStatus.Compatibility.INCOMPATIBLE,
             "signed explicit incompatibility");
@@ -66,6 +97,7 @@ final class LauncherContractTest {
         var preview = service.inspect(profile, second, SILENT);
         require(preview.problems().getFirst().condition() == PackService.Condition.DAMAGED_OWNED, "repair preview");
         require(Files.readString(installedJar).equals("damaged"), "verification never modifies mod");
+        require(preview.problems().getFirst().modVersion().isEmpty(), "damaged files do not supply a version");
         Files.writeString(installedJar, "changed after preview");
         expectIo(() -> service.apply(profile, second, preview.approvedRepairs(), SILENT));
         require(Files.readString(installedJar).equals("changed after preview"), "stale preview cannot authorize replacement");
@@ -150,7 +182,7 @@ final class LauncherContractTest {
     private static void writeJar(Path file, String id, String version) throws Exception {
         try (var zip = new ZipOutputStream(Files.newOutputStream(file))) {
             zip.putNextEntry(new ZipEntry("fabric.mod.json"));
-            zip.write(Updater.JSON.toJson(Map.of("id", id, "version", version)).getBytes(StandardCharsets.UTF_8));
+            zip.write(Updater.JSON.toJson(Map.of("id", id, "name", id, "version", version)).getBytes(StandardCharsets.UTF_8));
         }
     }
 

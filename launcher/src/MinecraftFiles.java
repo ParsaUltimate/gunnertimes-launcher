@@ -10,9 +10,13 @@ import java.util.concurrent.*;
 final class MinecraftFiles {
     static final String VERSION = "26.3";
     static final String LOADER = "0.20.1";
-    static final String LAUNCHER_VERSION = "1.2.1";
+    static final String LAUNCHER_VERSION = LauncherUpdates.VERSION;
     private static final String FABRIC_ID = "fabric-loader-" + LOADER + "-" + VERSION;
-    private static final String MOJANG_META = "https://piston-meta.mojang.com/mc/game/version_manifest_v2.json";
+    private static final String BASE_SHA1 = "8696584e8d2da5726487597e6c5777480387ec22";
+    private static final String MOJANG_META = "https://piston-meta.mojang.com/v1/packages/"
+        + BASE_SHA1 + "/" + VERSION + ".json";
+    private static final String FABRIC_SHA256 = "ebb22ba26e35a0b13f540fd7e7d8f95cb28a67d5498e5d8264700b4388c984ce";
+    private static final String FABRIC_LOADER_SHA1 = "7c7f9831e9f27b303d5d08decb5f4258a9f03296";
     private static final String FABRIC_META = "https://meta.fabricmc.net/v2/versions/loader/"
         + VERSION + "/" + LOADER + "/profile/json";
 
@@ -23,7 +27,7 @@ final class MinecraftFiles {
     MinecraftFiles(Path cache, Updater.ProgressSink progress) {
         this.cache = cache;
         this.progress = progress;
-        official = Path.of(System.getenv("APPDATA"), ".minecraft");
+        official = sharedDirectory();
     }
 
     List<String> prepare(Path profile, String username) throws Exception {
@@ -32,21 +36,18 @@ final class MinecraftFiles {
 
     List<String> prepare(Path profile, String username, int ramGiB, LaunchOptions.Settings options) throws Exception {
         progress.report(Updater.Progress.of(Updater.Step.CHECK, Updater.Status.BEGIN, "minecraft", ""));
-        Path versions = cache.resolve("versions");
-        Path baseMetadata = versions.resolve(VERSION + ".json");
-        if (!Files.isRegularFile(baseMetadata)) {
-            JsonObject index = json(Updater.fetch(URI.create(MOJANG_META), false, 4_000_000));
-            JsonObject release = null;
-            for (JsonElement element : index.getAsJsonArray("versions")) {
-                if (VERSION.equals(string(element.getAsJsonObject(), "id"))) release = element.getAsJsonObject();
-            }
-            if (release == null) throw new IOException("Minecraft " + VERSION + " is unavailable.");
-            download(baseMetadata, string(release, "url"), string(release, "sha1"), null);
-        }
+        Path versions = official.resolve("versions");
+        Path baseFolder = versions.resolve(VERSION);
+        Path baseMetadata = download(baseFolder.resolve(VERSION + ".json"), MOJANG_META, BASE_SHA1,
+            cache.resolve("versions").resolve(VERSION + ".json"));
         JsonObject base = json(Files.readAllBytes(baseMetadata));
-        Path fabricMetadata = versions.resolve(FABRIC_ID + ".json");
-        if (!Files.isRegularFile(fabricMetadata)) {
-            byte[] payload = Updater.fetch(URI.create(FABRIC_META), false, 100_000);
+        Path fabricMetadata = versions.resolve(FABRIC_ID).resolve(FABRIC_ID + ".json");
+        if (!matchesDigest(fabricMetadata, "SHA-256", FABRIC_SHA256)) {
+            Path legacy = cache.resolve("versions").resolve(FABRIC_ID + ".json");
+            byte[] payload = matchesDigest(legacy, "SHA-256", FABRIC_SHA256) ? Files.readAllBytes(legacy)
+                : Updater.fetch(URI.create(FABRIC_META), false, 100_000);
+            if (!HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(payload)).equals(FABRIC_SHA256))
+                throw new IOException("Fabric profile checksum failed.");
             validateFabric(json(payload));
             write(fabricMetadata, payload);
         }
@@ -57,7 +58,7 @@ final class MinecraftFiles {
             throw new IOException("Unexpected Minecraft version metadata.");
         }
 
-        Path libs = cache.resolve("libraries");
+        Path libs = official.resolve("libraries");
         List<Path> classpath = new ArrayList<>();
         long totalLibraries = base.getAsJsonArray("libraries").asList().stream()
             .map(JsonElement::getAsJsonObject).filter(MinecraftFiles::allowed)
@@ -72,7 +73,7 @@ final class MinecraftFiles {
             if (artifact == null) continue;
             String name = string(artifact, "path");
             classpath.add(download(libs.resolve(name), string(artifact, "url"),
-                string(artifact, "sha1"), official.resolve("libraries").resolve(name), "libraries"));
+                string(artifact, "sha1"), cache.resolve("libraries").resolve(name), "libraries"));
             progress.report(Updater.Progress.count(Updater.Step.CHECK, "libraries", name,
                 ++checkedLibraries, totalLibraries));
         }
@@ -84,8 +85,8 @@ final class MinecraftFiles {
                 + "/" + coordinate[1] + "-" + coordinate[2] + ".jar";
             String url = string(library, "url") + name;
             String hash = library.has("sha1") ? string(library, "sha1")
-                : loaderChecksum(libs.resolve(name), url);
-            Path jar = download(libs.resolve(name), url, hash, official.resolve("libraries").resolve(name), "libraries");
+                : loaderChecksum(coordinate);
+            Path jar = download(libs.resolve(name), url, hash, cache.resolve("libraries").resolve(name), "libraries");
             progress.report(Updater.Progress.count(Updater.Step.CHECK, "libraries", name,
                 ++checkedLibraries, totalLibraries));
             classpath.remove(jar);
@@ -94,17 +95,17 @@ final class MinecraftFiles {
         progress.report(Updater.Progress.of(Updater.Step.CHECK, Updater.Status.BEGIN, "minecraft", "client.jar"));
         JsonObject client = base.getAsJsonObject("downloads").getAsJsonObject("client");
         String clientHash = string(client, "sha1");
-        Path profileJar = profile.resolve(profile.getFileName() + ".jar");
-        Path localClient = hasHash(profileJar, clientHash) ? profileJar
-            : official.resolve("versions").resolve(VERSION).resolve(VERSION + ".jar");
-        classpath.add(download(versions.resolve(VERSION + ".jar"), string(client, "url"), clientHash, localClient));
+        Path legacyClient = cache.resolve("versions").resolve(VERSION + ".jar");
+        Path localClient = hasHash(legacyClient, clientHash) ? legacyClient
+            : profile.resolve(profile.getFileName() + ".jar");
+        classpath.add(download(baseFolder.resolve(VERSION + ".jar"), string(client, "url"), clientHash, localClient));
 
-        Path assets = cache.resolve("assets");
+        Path assets = official.resolve("assets");
         JsonObject assetIndex = base.getAsJsonObject("assetIndex");
         String assetId = string(assetIndex, "id");
         String indexPath = "indexes/" + assetId + ".json";
         Path index = download(assets.resolve(indexPath), string(assetIndex, "url"),
-            string(assetIndex, "sha1"), official.resolve("assets").resolve(indexPath));
+            string(assetIndex, "sha1"), cache.resolve("assets").resolve(indexPath));
         prepareAssets(assets, json(Files.readAllBytes(index)).getAsJsonObject("objects"));
 
         JsonObject logging = base.getAsJsonObject("logging").getAsJsonObject("client");
@@ -149,15 +150,20 @@ final class MinecraftFiles {
         }
     }
 
-    private static String loaderChecksum(Path jar, String url) throws Exception {
-        Path checksum = jar.resolveSibling(jar.getFileName() + ".sha1");
-        if (!Files.isRegularFile(checksum)) {
-            byte[] bytes = Updater.fetch(URI.create(url + ".sha1"), false, 256);
-            if (!new String(bytes, StandardCharsets.US_ASCII).strip().matches("[a-f0-9]{40}"))
-                throw new IOException("Invalid Fabric library checksum.");
-            write(checksum, bytes);
-        }
-        return Files.readString(checksum).strip();
+    private static String loaderChecksum(String[] coordinate) throws IOException {
+        if (Arrays.equals(coordinate, new String[]{"net.fabricmc", "fabric-loader", LOADER}))
+            return FABRIC_LOADER_SHA1;
+        throw new IOException("Missing hash for Fabric library " + String.join(":", coordinate));
+    }
+
+    static Path sharedDirectory() {
+        String appData = System.getenv("APPDATA");
+        return (appData == null || appData.isBlank()
+            ? Path.of(System.getProperty("user.home"), "AppData", "Roaming") : Path.of(appData)).resolve(".minecraft");
+    }
+
+    static Path sharedClient() {
+        return sharedDirectory().resolve("versions").resolve(VERSION).resolve(VERSION + ".jar");
     }
 
     private void prepareAssets(Path assets, JsonObject objects) throws Exception {
@@ -173,7 +179,7 @@ final class MinecraftFiles {
                 String relative = "objects/" + key;
                 downloads.submit(() -> download(assets.resolve(relative),
                     "https://resources.download.minecraft.net/" + key, hash,
-                    official.resolve("assets").resolve(relative), "assets"));
+                    cache.resolve("assets").resolve(relative), "assets"));
             }
             Throwable firstFailure = null;
             int failed = 0;
@@ -247,9 +253,13 @@ final class MinecraftFiles {
     }
 
     private static boolean hasHash(Path path, String expected) throws IOException {
+        return matchesDigest(path, "SHA-1", expected);
+    }
+
+    private static boolean matchesDigest(Path path, String algorithm, String expected) throws IOException {
         if (path == null || !Files.isRegularFile(path)) return false;
         try {
-            var digest = MessageDigest.getInstance("SHA-1");
+            var digest = MessageDigest.getInstance(algorithm);
             try (var input = new DigestInputStream(Files.newInputStream(path), digest)) {
                 input.transferTo(OutputStream.nullOutputStream());
             }

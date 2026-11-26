@@ -21,7 +21,7 @@ final class PackService {
     record StoredCheck(Envelope envelope, InstantValue time, String notes) {}
     record InstantValue(long millis) {}
     enum Condition { VERIFIED, MISSING, DAMAGED_OWNED, CONFLICT }
-    record Item(Updater.Entry entry, Condition condition, String actualHash, String location) {}
+    record Item(Updater.Entry entry, Condition condition, String actualHash, String location, String modName, String modVersion) {}
     record Inspection(List<Item> items) {
         boolean healthy() { return items.stream().allMatch(i -> i.condition == Condition.VERIFIED); }
         List<Item> problems() { return items.stream().filter(i -> i.condition != Condition.VERIFIED).toList(); }
@@ -171,12 +171,32 @@ final class PackService {
                     }
                 }
             }
-            items.add(new Item(entry, condition, hash, location));
+            String modName = "", modVersion = "";
+            if (condition == Condition.VERIFIED && entry.path().startsWith("mods/")) {
+                try (var archive = new java.util.zip.ZipFile(canonical.resolve(location).toFile())) {
+                    var descriptor = archive.getEntry("fabric.mod.json");
+                    if (descriptor != null && descriptor.getSize() >= 0 && descriptor.getSize() <= 1_048_576) {
+                        try (var stream = archive.getInputStream(descriptor)) {
+                            var json = MinecraftFiles.json(stream.readNBytes(1_048_576));
+                            modName = modText(json.get("name"));
+                            modVersion = modText(json.get("version"));
+                        }
+                    }
+                } catch (IOException | RuntimeException ignored) {
+                    // The signed file is healthy even if it has no display metadata.
+                }
+            }
+            items.add(new Item(entry, condition, hash, location, modName, modVersion));
             if (condition == Condition.VERIFIED)
                 progress.report(Updater.Progress.of(Updater.Step.CHECK, Updater.Status.REUSED, "pack", location));
             progress.report(Updater.Progress.count(Updater.Step.CHECK, "pack", location, ++checked, release.pack.files().size()));
         }
         return new Inspection(List.copyOf(items));
+    }
+
+    private static String modText(com.google.gson.JsonElement value) {
+        return value != null && value.isJsonPrimitive() && value.getAsJsonPrimitive().isString()
+            ? value.getAsString().replaceAll("[\\p{Cntrl}\\p{Cf}]", "").strip() : "";
     }
 
     void apply(Path profile, Release release, Map<String, String> repair, Updater.ProgressSink progress)

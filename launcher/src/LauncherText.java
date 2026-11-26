@@ -21,15 +21,20 @@ final class LauncherText {
 
     void orient(Component component) {
         component.applyComponentOrientation(direction);
-        technicalFields(component);
+        decorate(component);
     }
 
-    private void technicalFields(Component component) {
+    private void decorate(Component component) {
+        if (rtl && component.getFont() instanceof javax.swing.plaf.UIResource) {
+            float size = component.getFont().getSize2D();
+            component.setFont(component instanceof AbstractButton || component instanceof JComboBox<?>
+                ? PersianTypography.control(size) : PersianTypography.body(size));
+        }
         if (component instanceof JComponent swing && Boolean.TRUE.equals(swing.getClientProperty("technical"))) {
             component.applyComponentOrientation(ComponentOrientation.LEFT_TO_RIGHT);
             return;
         }
         if (component instanceof Container children)
-            for (Component child : children.getComponents()) technicalFields(child);
+            for (Component child : children.getComponents()) decorate(child);
     }
 }

@@ -34,6 +34,7 @@ final class LauncherSettings {
     private final JCheckBox customResolution;
     private final JLabel feedback;
     private final JButton save;
+    private final java.util.Map<JComponent, JLabel> fieldErrors = new java.util.IdentityHashMap<>();
     private final JButton[] tabs = new JButton[SECTIONS.length];
     private final java.util.ArrayList<JTextField> javaReadouts = new java.util.ArrayList<>();
     private LaunchOptions.JavaInfo resolvedJava;
@@ -55,20 +56,26 @@ final class LauncherSettings {
         customResolution = new JCheckBox(ui.t("customResolution"), initial.resolution());
         customResolution.setOpaque(false);
         customResolution.setForeground(LauncherWindow.TEXT);
-        customResolution.setFont(ui.font(14, false));
+        customResolution.setFont(ui.controlFont(14));
 
         body = LauncherWindow.stack(LauncherWindow.BG, 14);
-        body.add(ui.label(ui.t("navSettings"), 30, true, LauncherWindow.TEXT));
+        body.add(ui.utilityTitle("navSettings", ui.frame().getWidth() < 1020 ? 33 : 40));
         var layout = LauncherWindow.panel(new BorderLayout(21, 0), LauncherWindow.BG);
-        var menu = LauncherWindow.stack(LauncherWindow.BG, 4);
-        menu.setPreferredSize(new Dimension(180, 315));
+        var menu = LauncherWindow.outline(LauncherWindow.stack(LauncherWindow.RAIL, 5), 10);
+        menu.setPreferredSize(new Dimension(ui.frame().getWidth() < 1020 ? 196 : 287, 386));
         for (int index = 0; index < SECTIONS.length; index++) {
             int target = index;
             var action = ui.button(ui.t(SECTIONS[index]), false);
             action.setHorizontalAlignment(SwingConstants.LEADING);
+            action.setToolTipText(ui.t(SECTIONS[index]));
             action.addActionListener(event -> switchSection(target));
             tabs[index] = action;
+            String[] icons = {"check", "person", "game", "document", "download", "server", "repair"};
+            action.setIcon(new UtilityIcon(icons[index]));
+            action.setIconTextGap(9);
+            action.setFont(ui.controlFont(ui.frame().getWidth() < 1020 ? 13 : 16));
             menu.add(action);
+            if (index < SECTIONS.length - 1) menu.add(new JSeparator());
         }
         layout.add(menu, BorderLayout.LINE_START);
         pages = LauncherWindow.panel(new CardLayout(), LauncherWindow.BG);
@@ -84,7 +91,8 @@ final class LauncherSettings {
         feedback = ui.label("", 14, true, LauncherWindow.MUTED);
         body.add(feedback);
         if (!ui.messageKey().isEmpty()) message(ui.messageKey(), ui.noticeDetails(), ui.noticeError());
-        var footer = LauncherWindow.panel(new FlowLayout(FlowLayout.LEADING, 8, 0), LauncherWindow.BG);
+        var footer = LauncherWindow.panel(new FlowLayout(FlowLayout.TRAILING, 8, 0), LauncherWindow.BG);
+        footer.setBorder(BorderFactory.createMatteBorder(1, 0, 0, 0, LauncherWindow.EDGE));
         save = ui.button(ui.t("save"), true);
         save.setEnabled(!ui.working());
         save.addActionListener(event -> save());
@@ -92,7 +100,8 @@ final class LauncherSettings {
         var cancel = ui.button(ui.t("cancel"), false);
         cancel.addActionListener(event -> ui.cancelSettings());
         footer.add(cancel);
-        body.add(footer);
+        pages.setBorder(new EmptyBorder(0, 0, 0, 0));
+        layout.add(footer, BorderLayout.PAGE_END);
         switchSection(section);
         resolveJava();
     }
@@ -109,15 +118,17 @@ final class LauncherSettings {
         section = chosen;
         ((CardLayout) pages.getLayout()).show(pages, SECTIONS[chosen]);
         for (int index = 0; index < tabs.length; index++) {
-            tabs[index].setBackground(index == chosen ? new Color(0x47311C) : LauncherWindow.BG);
+            tabs[index].setBackground(index == chosen ? new Color(0x47311C) : LauncherWindow.RAIL);
+            tabs[index].putClientProperty("outlined", index == chosen);
+            tabs[index].putClientProperty("selected", index == chosen);
+            tabs[index].getAccessibleContext().setAccessibleDescription(index == chosen ? ui.t("selectedPage") : "");
             tabs[index].setForeground(index == chosen ? LauncherWindow.GOLD : LauncherWindow.TEXT);
         }
     }
 
     private JPanel section(String key) {
-        var area = LauncherWindow.stack(LauncherWindow.PANEL, 12);
-        area.setBorder(new EmptyBorder(19, 21, 21, 21));
-        area.add(ui.label(ui.t(key), 19, true, LauncherWindow.TEXT));
+        var area = LauncherWindow.outline(LauncherWindow.stack(LauncherWindow.PANEL, 10), 18);
+        area.add(ui.utilityTitle(key, 22));
         var line = new JSeparator();
         line.setForeground(LauncherWindow.EDGE);
         area.add(line);
@@ -125,7 +136,36 @@ final class LauncherSettings {
     }
 
     private void add(JPanel area, String key, JComponent input) {
-        area.add(ui.labeled(ui.t(key), input, input));
+        area.add(formRow(key, input, input));
+    }
+
+    private JPanel formRow(String key, JComponent input, JComponent focus) {
+        var row = LauncherWindow.panel(new BorderLayout(12, 4), LauncherWindow.PANEL);
+        var label = ui.label(ui.t(key), 14, true, LauncherWindow.TEXT);
+        label.setLabelFor(focus);
+        label.setPreferredSize(new Dimension(ui.frame().getWidth() < 1020 ? 180 : 206, 28));
+        label.setToolTipText(ui.t(key));
+        row.add(label, ui.frame().getWidth() < 780 ? BorderLayout.PAGE_START : BorderLayout.LINE_START);
+        row.add(input, BorderLayout.CENTER);
+        if (focus instanceof JTextField field && field.isEditable()) {
+            var error = ui.label("", 13, false, LauncherWindow.RED);
+            error.setVisible(false);
+            row.add(error, BorderLayout.PAGE_END);
+            fieldErrors.put(focus, error);
+            watch(field, () -> fieldError(focus, null, ""));
+        }
+        return row;
+    }
+
+    private void fieldError(JComponent field, String key, String detail) {
+        var error = fieldErrors.get(field);
+        if (error == null) return;
+        error.setText(key == null ? "" : ui.t(key));
+        error.setToolTipText(detail.isEmpty() ? null : detail);
+        error.setVisible(key != null);
+        field.getAccessibleContext().setAccessibleDescription(key == null ? null : ui.t(key));
+        body.revalidate();
+        body.repaint();
     }
 
     private JPanel general() {
@@ -141,7 +181,7 @@ final class LauncherSettings {
     private JPanel profile() {
         var area = section("profileSection");
         add(area, "player", name);
-        area.add(ui.labeled(ui.t("profile"), pathPicker(profile, false), profile));
+        area.add(formRow("profile", pathPicker(profile, false), profile));
         var resolved = readOnly("");
         Runnable resolve = () -> {
             try { resolved.setText(GunnertimesLauncher.profilePath(profile.getText()).toString()); }
@@ -160,10 +200,8 @@ final class LauncherSettings {
         var area = section("displaySection");
         add(area, "startupDisplay", display);
         area.add(customResolution);
-        var dimensions = LauncherWindow.panel(new GridLayout(1, 2, 9, 0), LauncherWindow.PANEL);
-        dimensions.add(ui.labeled(ui.t("width"), width, width));
-        dimensions.add(ui.labeled(ui.t("height"), height, height));
-        area.add(dimensions);
+        area.add(formRow("width", width, width));
+        area.add(formRow("height", height, height));
         Runnable enable = () -> {
             boolean windowed = display.getSelectedIndex() == 2;
             customResolution.setEnabled(windowed);
@@ -179,21 +217,102 @@ final class LauncherSettings {
     }
 
     private JPanel java() {
-        var area = section("javaSection");
-        add(area, "javaChoice", javaChoice);
+        var area = section("javaRuntimeHeading");
+        var group = new ButtonGroup();
+        for (int i = 0; i < JAVA.length; i++) {
+            int mode = i;
+            var option = new JRadioButton(ui.t("option." + JAVA[i]), javaChoice.getSelectedIndex() == i);
+            option.setOpaque(false);
+            option.setForeground(LauncherWindow.TEXT);
+            option.setFont(ui.controlFont(15));
+            option.setIcon(new Icon() {
+                public int getIconWidth() { return 20; }
+                public int getIconHeight() { return 20; }
+                public void paintIcon(Component component, Graphics graphics, int x, int y) {
+                    var g = (Graphics2D) graphics.create();
+                    g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                    g.setStroke(new BasicStroke(1.7f));
+                    g.setColor(option.isSelected() || option.hasFocus() ? LauncherWindow.GOLD : LauncherWindow.MUTED);
+                    g.drawOval(x + 2, y + 2, 15, 15);
+                    if (option.isSelected()) g.fillOval(x + 6, y + 6, 8, 8);
+                    g.dispose();
+                }
+            });
+            option.setIconTextGap(8);
+            option.addActionListener(event -> javaChoice.setSelectedIndex(mode));
+            group.add(option);
+            area.add(option);
+        }
         var picker = pathPicker(javaPath, true);
-        area.add(ui.labeled(ui.t("javaExecutable"), picker, javaPath));
+        area.add(formRow("javaExecutable", picker, javaPath));
         Runnable enable = () -> {
             boolean custom = javaChoice.getSelectedIndex() == 2;
-            javaPath.setEnabled(custom);
             for (Component child : picker.getComponents()) child.setEnabled(custom);
+            if (!custom) fieldError(javaPath, null, "");
         };
         javaChoice.addActionListener(event -> enable.run());
         enable.run();
         var resolved = readOnly(ui.t("unknown"));
         add(area, "resolvedJava", resolved);
         javaReadouts.add(resolved);
+
+        var divider = new JSeparator();
+        divider.setForeground(LauncherWindow.EDGE);
+        area.add(divider);
+        area.add(ui.utilityTitle("memoryHeading", 20));
         add(area, "ram", ram);
+        var slider = new JSlider(2, 32, Math.clamp(ui.settings().ramGiB(), 2, 32));
+        slider.setOpaque(false);
+        slider.setForeground(LauncherWindow.GOLD);
+        slider.setUI(new javax.swing.plaf.basic.BasicSliderUI(slider) {
+            @Override public void paintTrack(Graphics graphics) {
+                int center = trackRect.y + trackRect.height / 2 - 3;
+                int thumb = thumbRect.x + thumbRect.width / 2;
+                int origin = drawInverted() ? trackRect.x + trackRect.width : trackRect.x;
+                var g = (Graphics2D) graphics.create();
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(LauncherWindow.EDGE);
+                g.fillRoundRect(trackRect.x, center, trackRect.width, 6, 6, 6);
+                g.setColor(LauncherWindow.GOLD);
+                g.fillRoundRect(Math.min(origin, thumb), center, Math.abs(origin - thumb), 6, 6, 6);
+                g.dispose();
+            }
+            @Override public void paintThumb(Graphics graphics) {
+                var g = (Graphics2D) graphics.create();
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                int x = thumbRect.x + (thumbRect.width - 14) / 2;
+                int y = thumbRect.y + (thumbRect.height - 14) / 2;
+                g.setColor(LauncherWindow.GOLD);
+                g.fillOval(x, y, 14, 14);
+                g.setColor(LauncherWindow.TEXT);
+                g.drawOval(x, y, 14, 14);
+                g.dispose();
+            }
+        });
+        slider.getAccessibleContext().setAccessibleName(ui.t("ram"));
+        var adjusting = new boolean[1];
+        Runnable reflectRam = () -> {
+            try {
+                int value = Integer.parseInt(ram.getText().strip());
+                if (value >= 2 && value <= 32) {
+                    adjusting[0] = true;
+                    slider.setValue(value);
+                }
+            } catch (NumberFormatException ignored) {
+                // Leave invalid input visible so the user can correct it.
+            } finally { adjusting[0] = false; }
+        };
+        slider.addChangeListener(event -> {
+            if (!adjusting[0] && !Integer.toString(slider.getValue()).equals(ram.getText()))
+                ram.setText(Integer.toString(slider.getValue()));
+        });
+        watch(ram, reflectRam);
+        reflectRam.run();
+        var scale = LauncherWindow.panel(new BorderLayout(8, 0), LauncherWindow.PANEL);
+        scale.add(ui.label("2 GiB", 12, false, LauncherWindow.MUTED), BorderLayout.LINE_START);
+        scale.add(slider, BorderLayout.CENTER);
+        scale.add(ui.label("32 GiB", 12, false, LauncherWindow.MUTED), BorderLayout.LINE_END);
+        area.add(scale);
         long physical = LaunchOptions.physicalMemory();
         if (physical > 0) {
             long gib = physical / (1024L * 1024 * 1024);
@@ -209,19 +328,25 @@ final class LauncherSettings {
         add(area, "installedVersion", readOnly(ui.installedVersion()));
         add(area, "availableVersion", readOnly(ui.availableVersion()));
         add(area, "lastCheck", readOnly(ui.lastCheck()));
-        add(area, "cachePath", readOnly(GunnertimesLauncher.CACHE.toString()));
+        add(area, "cachePath", readOnly(MinecraftFiles.sharedDirectory().toString()));
         var check = action(ui.checking() ? "checkingRelease" : "checkNow", ui::checkNow);
+        ui.downloadStyle(check);
         check.setEnabled(!ui.checking() && !ui.working());
         area.add(actions(check));
         if (!ui.checkError().isEmpty())
             area.add(actions(action("details", () -> ui.detailDialog(ui.t("releaseUnavailable"), ui.checkError()))));
+        area.add(new JSeparator());
+        add(area, "launcherBuild", readOnly(LauncherUpdates.VERSION));
+        var launcher = action("checkLauncherUpdate", () -> ui.checkLauncher(true));
+        ui.downloadStyle(launcher);
+        area.add(actions(launcher));
         return area;
     }
 
     private JPanel storage() {
         var area = section("storageSection");
         area.add(actions(action("openProfile", () -> withProfile(ui::open)),
-            action("openCache", () -> ui.open(GunnertimesLauncher.CACHE)),
+            action("openCache", () -> ui.open(MinecraftFiles.sharedDirectory())),
             action("openLogs", () -> withProfile(path -> ui.open(path.resolve("logs"))))));
         var summary = ui.wrapped(ui.t("storageEmpty"));
         area.add(summary);
@@ -240,13 +365,14 @@ final class LauncherSettings {
             action("openLog", () -> withProfile(path -> lastLog(path, false))),
             action("openCrashes", () -> withProfile(path -> ui.open(path.resolve("crash-reports")))));
         area.add(folders);
-        area.add(actions(action("copyDiagnostics", this::copyDiagnostics),
-            action("resetPreferences", () -> {
+        var reset = action("resetPreferences", () -> {
                 if (!ui.working() && ui.confirm(ui.t("resetPreferences"), ui.t("resetConfirm"))) {
                     try { ui.acceptSettings(GunnertimesLauncher.defaults(ui.settings().language())); }
                     catch (IOException failure) { message("settingsFailure", failure.toString(), true); }
                 }
-            })));
+            });
+        ui.removalStyle(reset);
+        area.add(actions(action("copyDiagnostics", this::copyDiagnostics), reset));
         return area;
     }
 
@@ -256,7 +382,7 @@ final class LauncherSettings {
         box.setSelectedIndex(Math.max(0, List.of(choices).indexOf(selected)));
         box.setBackground(LauncherWindow.BG);
         box.setForeground(LauncherWindow.TEXT);
-        box.setFont(ui.font(14, false));
+        box.setFont(ui.controlFont(14));
         return box;
     }
 
@@ -278,8 +404,7 @@ final class LauncherSettings {
             var picker = new JFileChooser();
             picker.setLocale(ui.isPersian() ? java.util.Locale.forLanguageTag("fa-IR") : java.util.Locale.ENGLISH);
             picker.updateUI();
-            picker.setComponentOrientation(ui.isPersian() ? ComponentOrientation.RIGHT_TO_LEFT
-                : ComponentOrientation.LEFT_TO_RIGHT);
+            new LauncherText(ui.isPersian() ? "fa" : "en").orient(picker);
             picker.setApproveButtonText(ui.t(executable ? "chooseExecutable" : "chooseFolder"));
             picker.setDialogTitle(ui.t(executable ? "javaExecutable" : "chooseFolder"));
             picker.setFileSelectionMode(executable ? JFileChooser.FILES_ONLY : JFileChooser.DIRECTORIES_ONLY);
@@ -318,14 +443,15 @@ final class LauncherSettings {
                     throw new NumberFormatException();
             } catch (NumberFormatException error) {
                 switchSection(2);
-                message("invalidResolution", "", true);
-                width.requestFocusInWindow();
+                JTextField invalid = isDimension(draft.width(), 640, 7680) ? height : width;
+                fieldError(invalid, "invalidResolution", "");
+                invalid.requestFocusInWindow();
                 return;
             }
         }
         if (draft.java().equals("custom") && draft.javaPath().isBlank()) {
             switchSection(3);
-            message("invalidJava", "", true);
+            fieldError(javaPath, "invalidJava", "");
             javaPath.requestFocusInWindow();
             return;
         }
@@ -336,7 +462,6 @@ final class LauncherSettings {
             candidate = GunnertimesLauncher.validated(draft.name(), draft.profile(), ui.settings().language(),
                 draft.ram(), opts, false);
         } catch (GunnertimesLauncher.InputError failure) {
-            message(failure.key, "", true);
             focusInvalidInput(failure.key);
             return;
         }
@@ -362,7 +487,8 @@ final class LauncherSettings {
                     Thread.currentThread().interrupt();
                 } catch (ExecutionException failure) {
                     switchSection(3);
-                    message("invalidJava", failure.getCause().toString(), true);
+                    feedback.setText("");
+                    fieldError(javaPath, "invalidJava", failure.getCause().toString());
                     javaPath.requestFocusInWindow();
                 }
             }
@@ -371,10 +497,21 @@ final class LauncherSettings {
 
     void focusInvalidInput(String key) {
         switchSection(key.equals("invalidRam") ? 3 : 1);
-        switch (key) {
-            case "invalidRam" -> ram.requestFocusInWindow();
-            case "invalidName" -> name.requestFocusInWindow();
-            default -> profile.requestFocusInWindow();
+        JTextField target = switch (key) {
+            case "invalidRam" -> ram;
+            case "invalidName" -> name;
+            default -> profile;
+        };
+        fieldError(target, key, "");
+        target.requestFocusInWindow();
+    }
+
+    private static boolean isDimension(String text, int min, int max) {
+        try {
+            int value = Integer.parseInt(text.strip());
+            return value >= min && value <= max;
+        } catch (NumberFormatException ignored) {
+            return false;
         }
     }
 
@@ -425,7 +562,7 @@ final class LauncherSettings {
                         .append(measureText(profileDirectory.resolve(category))).append('\n');
                 }
                 result.append(ui.t("modCache")).append("  ").append(measureText(profileDirectory.resolve(".gunnertimes/cache")))
-                    .append('\n').append(ui.t("gameCache")).append("  ").append(measureText(GunnertimesLauncher.CACHE));
+                    .append('\n').append(ui.t("gameCache")).append("  ").append(measureText(MinecraftFiles.sharedDirectory()));
                 return result.toString();
             }
             @Override protected void done() {

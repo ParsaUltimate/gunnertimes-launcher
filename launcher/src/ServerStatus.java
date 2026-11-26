@@ -76,7 +76,7 @@ final class ServerStatus {
     }
 
     private static int clientProtocol() {
-        Path jar = GunnertimesLauncher.CACHE.resolve("versions/" + MinecraftFiles.VERSION + ".jar");
+        Path jar = MinecraftFiles.sharedClient();
         try (var archive = new java.util.zip.ZipFile(jar.toFile());
              var stream = archive.getInputStream(archive.getEntry("version.json"))) {
             return MinecraftFiles.json(stream.readNBytes(32_768)).get("protocol_version").getAsInt();
