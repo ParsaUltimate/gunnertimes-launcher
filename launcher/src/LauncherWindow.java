@@ -149,9 +149,9 @@ final class LauncherWindow {
         var mark = label("", 20, true, GOLD);
         mark.setIcon(navigationIcon(Page.PACK));
         brand.add(mark, BorderLayout.LINE_START);
-        var wordmark = panel(new GridLayout(compact ? 1 : 2, 1, 0, -3), null);
-        wordmark.add(label("Gunnertimes", compact ? 19 : 27, true, TEXT));
-        if (!compact) wordmark.add(label("MINECRAFT MODPACK LAUNCHER", 10, true, MUTED));
+        var wordmark = panel(new BorderLayout(), null);
+        wordmark.add(label("Gunnertimes", compact ? 19 : 27, true, TEXT), BorderLayout.PAGE_START);
+        if (!compact) wordmark.add(label("MINECRAFT MODPACK LAUNCHER", 10, true, MUTED), BorderLayout.PAGE_END);
         brand.add(wordmark, BorderLayout.CENTER);
         bar.add(brand, BorderLayout.LINE_START);
         var tabs = panel(new FlowLayout(FlowLayout.CENTER, compact ? 2 : 8, 0), RAIL);
@@ -198,7 +198,9 @@ final class LauncherWindow {
             menu.show(language, text.rtl ? 0 : language.getWidth() - menu.getPreferredSize().width, language.getHeight());
             MenuSelectionManager.defaultManager().setSelectedPath(new MenuElement[]{menu, (MenuElement) menu.getComponent(text.rtl ? 0 : 1)});
         });
-        bar.add(language, BorderLayout.LINE_END);
+        var languageSlot = panel(new GridBagLayout(), RAIL);
+        languageSlot.add(language);
+        bar.add(languageSlot, BorderLayout.LINE_END);
         return bar;
     }
 
@@ -631,7 +633,9 @@ final class LauncherWindow {
             divider.setForeground(EDGE);
             article.add(divider);
             article.add(label(t("guideLogs"), 20, true, TEXT));
-            article.add(wrapped(t("logsHint")));
+            var hint = wrapped(t("logsHint"));
+            hint.setBackground(BG);
+            article.add(hint);
         }
         if (helpTopic == 0 || helpTopic == 4) {
             var row = panel(new FlowLayout(FlowLayout.LEADING, 0, 0), PANEL);
@@ -657,6 +661,7 @@ final class LauncherWindow {
         layout.add(topicScroll, BorderLayout.LINE_START);
         layout.add(articleScroll, BorderLayout.CENTER);
         body.add(layout, BorderLayout.CENTER);
+        SwingUtilities.invokeLater(() -> articleScroll.getVerticalScrollBar().setValue(0));
         return body;
     }
 
@@ -1337,14 +1342,23 @@ final class LauncherWindow {
     }
 
     JTextField field(String value, int columns) {
-        var input = technical(new JTextField(value, columns));
+        var input = technical(new JTextField(value, columns) {
+            @Override protected void paintComponent(Graphics graphics) {
+                var g = (Graphics2D) graphics.create();
+                g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+                g.setColor(getBackground());
+                g.fillRoundRect(0, 0, getWidth(), getHeight(), 9, 9);
+                g.dispose();
+                super.paintComponent(graphics);
+            }
+        });
         input.setFont(font(14, false));
         input.setForeground(TEXT);
         input.setCaretColor(GOLD);
         input.setSelectionColor(new Color(0x65523D));
         input.setBackground(BG);
         input.setOpaque(false);
-        input.setBorder(new RoundedSurface(9, BG, EDGE, 8));
+        input.setBorder(new RoundedSurface(9, null, EDGE, 8));
         return input;
     }
 
@@ -1406,13 +1420,8 @@ final class LauncherWindow {
         @Override public void paintBorder(Component component, Graphics graphics, int x, int y, int width, int height) {
             var g = (Graphics2D) graphics.create();
             g.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
-            g.setColor(fill);
-            if (component instanceof JTextField) {
-                var area = new java.awt.geom.Area(new java.awt.geom.RoundRectangle2D.Double(x, y, width, height, radius, radius));
-                area.subtract(new java.awt.geom.Area(new Rectangle(x + padding, y + padding,
-                    Math.max(0, width - 2 * padding), Math.max(0, height - 2 * padding))));
-                g.fill(area);
-            } else {
+            if (fill != null) {
+                g.setColor(fill);
                 g.fillRoundRect(x, y, width, height, radius, radius);
             }
             g.setColor(component.isFocusOwner() ? GOLD : stroke);
