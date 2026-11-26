@@ -1,4 +1,3 @@
-import com.google.gson.*;
 import java.io.*;
 import java.net.URI;
 import java.nio.charset.StandardCharsets;
@@ -11,7 +10,8 @@ final class LauncherUpdates {
     static final String VERSION = version();
     static final String REPOSITORY = "ParsaUltimate/gunnertimes-releases";
     private static final String MARKER = "<!-- gunnertimes-update-v1 ";
-    private static final String API = "https://api.github.com/repos/" + REPOSITORY + "/releases?per_page=100&page=";
+    private static final URI STABLE = URI.create("https://raw.githubusercontent.com/" + REPOSITORY
+        + "/main/launcher-stable.md");
 
     enum Type {
         INSTALLED("Gunnertimes-Setup.exe"), PORTABLE("Gunnertimes-Portable.jar");
@@ -60,32 +60,10 @@ final class LauncherUpdates {
     }
 
     static Release check() throws Exception {
-        JsonObject candidate = null;
-        int[] newest = parts(VERSION);
-        for (int page = 1; ; page++) {
-            var bytes = Updater.fetch(URI.create(API + page), false, 8_000_000);
-            var results = JsonParser.parseString(new String(bytes, StandardCharsets.UTF_8)).getAsJsonArray();
-            for (JsonElement element : results) {
-                JsonObject item = element.getAsJsonObject();
-                String tag = item.get("tag_name").getAsString();
-                if (item.get("draft").getAsBoolean() || item.get("prerelease").getAsBoolean()
-                        || !tag.startsWith("launcher-v")) continue;
-                int[] version;
-                try { version = parts(tag.substring("launcher-v".length())); }
-                catch (IllegalArgumentException ignored) { continue; }
-                if (Arrays.compare(version, newest) > 0) {
-                    candidate = item;
-                    newest = version;
-                }
-            }
-            if (results.size() < 100) break;
-        }
-        if (candidate == null) return null;
+        var bytes = Updater.fetch(STABLE, false, 262_144);
         PublicKey key = publicKey(resource("launcher-update-public.txt").strip());
-        Release release = verifyNotes(candidate.get("body").getAsString(), key);
-        if (!candidate.get("tag_name").getAsString().equals("launcher-v" + release.version))
-            throw new IOException("Launcher release tag does not match signed version.");
-        return release;
+        Release release = verifyNotes(new String(bytes, StandardCharsets.UTF_8), key);
+        return Arrays.compare(parts(release.version), parts(VERSION)) > 0 ? release : null;
     }
 
     static Path download(Artifact asset, Updater.ProgressSink progress) throws Exception {
