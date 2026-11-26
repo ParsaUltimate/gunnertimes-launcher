@@ -2,14 +2,70 @@
 
 Windows x64 launcher for the official Gunnertimes pack, Minecraft 26.3 and Fabric Loader 0.20.1.
 
-Get the two player downloads from the [public release channel](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest).
+[Download the latest stable build](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest)
 
-- **Gunnertimes-Setup.exe** installs for your Windows user and includes Java 25. Open Gunnertimes from Start or the desktop. To uninstall, select Gunnertimes in Windows Installed apps.
-- **Gunnertimes-Portable.jar** requires an installed [Java 25 x64](https://learn.microsoft.com/en-us/java/openjdk/download). Put it in a writable folder and run `java -jar Gunnertimes-Portable.jar`.
+![Gunnertimes Home showing the profile, Play, Join, Update and pack status](docs/screenshots/home-en.png)
 
-Choose a profile and offline username under **Settings**. **Install** pins a signed release. **Play** verifies and opens it. **Join Gunnertimes** attempts to connect to the official server with the installed pack. **Update** previews and installs a newer pack. **Verify** inspects files and **Repair** previews changes before applying them to the installed release. Check for launcher updates under **Settings → Downloads and updates**. The launcher also checks on startup.
+## Install on Windows
 
-The default profile is `%LOCALAPPDATA%\Gunnertimes\profiles\Gunnertimes`. You can select a game directory or its `mods` folder. Assets, libraries and game versions are shared with `%APPDATA%\.minecraft`, while mods, config and saves stay in your profile. Keep independently launched Minecraft instances closed during pack maintenance. A verified installation can launch offline once the required files are present. Multiplayer servers must accept offline accounts.
+| Download | How to run it |
+| --- | --- |
+| [Gunnertimes-Setup.exe](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest/download/Gunnertimes-Setup.exe) | Run the installer and open Gunnertimes from Start or the desktop. Java 25 is included. The installer uses your Windows user account and supports uninstall from Installed apps. |
+| [Gunnertimes-Portable.jar](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest/download/Gunnertimes-Portable.jar) | Install Java 25 x64, put the JAR in a writable folder and run the command below. |
+
+```powershell
+java -jar Gunnertimes-Portable.jar
+```
+
+## First launch
+
+1. Open **Settings → Player and profile**. Enter an offline username of 3–16 characters using English letters, digits or underscores.
+2. Keep the default profile to create a fresh installation. To reuse an existing profile, choose the directory containing its `mods` folder. Select **Save settings**.
+3. On **Home**, select **Install** and wait for the signed pack to finish installing. Then select **Play** to prepare Minecraft and start the game. Use an internet connection during setup and whenever required files need to be downloaded.
+
+Use the globe in the top navigation to switch between English and فارسی. The launcher remembers your language.
+
+## Where files are stored
+
+| Path | What goes there |
+| --- | --- |
+| `%APPDATA%\.minecraft` | The **default shared location** for Minecraft and Fabric files. Gunnertimes uses the healthy files in `assets`, `libraries` and `versions` directly from this folder. |
+| `%LOCALAPPDATA%\Gunnertimes\profiles\Gunnertimes` | The default Gunnertimes profile. The selected profile holds your `mods`, `config`, `saves` and `logs`. |
+
+Gunnertimes resolves the shared location automatically from the current Windows user. It creates the required directories when preparing the game. It can reuse verified files from the older launcher cache to fill gaps, or download and verify missing and damaged files from the official Minecraft and Fabric sources. The game then reads the shared files in `.minecraft`. See the resolved path in **Settings → Downloads & updates**.
+
+A profile can live anywhere writable. For example, someone already using Goharian New Server can select `%APPDATA%\.minecraft\versions\Goharian New Server` to reuse that profile's mods, settings and worlds. If you select its `mods` folder, the launcher uses the parent directory.
+
+## What the launcher does
+
+| Area | Actions and information |
+| --- | --- |
+| **Home** | **Install** installs the official pack. **Play** starts Minecraft with the installed pack. **Join Gunnertimes** also attempts to connect to the official server. **Update** previews a newer pack before installing it. Home shows installed and available pack versions and server status when available. |
+| **Pack** | Search official mods by name, ID, version or filename. See the installed release and file health. **Verify files** checks the files without changing them. **Repair** previews changes and restores the installed official pack while preserving unrelated files. |
+| **Settings** | Set the player name, profile, display options, Java and RAM. Open the storage and diagnostics pages to find folders, measure disk usage or copy a diagnostic summary. Check for launcher updates in **Downloads & updates**. |
+| **Help** | Find first-launch steps, copy profile paths, understand Play and Join, troubleshoot downloads and mods, and open the logs for the current profile. |
+
+Launcher updates and pack updates are independent. Gunnertimes checks for launcher updates on startup. It verifies the signed release information and the downloaded EXE or JAR before applying a launcher update.
+
+<details>
+<summary>More launcher screenshots</summary>
+
+**Pack in Persian**
+
+![Persian Pack screen with official mod names, versions and verification status](docs/screenshots/pack-fa.png)
+
+**Settings in English**
+
+![English Java and memory settings with the seven settings sections](docs/screenshots/settings-en.png)
+
+</details>
+
+## Troubleshooting
+
+- **Download failed.** Reconnect and select **Try again**. Already verified files can be reused.
+- **Official mod damaged.** Close Minecraft, go to **Pack → Verify files**, then preview and confirm **Repair**. If the launcher names a conflicting manual mod, back it up and move it outside the profile’s `mods` folder before retrying.
+- **Minecraft did not start or closed.** Select **Open game log** from the progress panel when available. Use **Help → Logs and offline use → Open logs** for launcher and game logs in the active profile.
+- **Playing offline.** Once the official pack and required game files are present, **Play** works offline for single-player. A multiplayer server must accept offline accounts.
 
 ## Build and test
 

@@ -108,7 +108,7 @@ class LauncherSettingsUiTest {
                 app.frame().validate();
                 int rail = helpRailHeight("fa");
                 if (rail <= 0) throw new AssertionError("Missing Help sidebar");
-                for (String key : new String[]{"guideStart", "guidePlayNav", "guideFix", "guideLogs", "guideFolder"}) {
+                for (String key : new String[]{"guideStart", "guidePlayNav", "guideFix", "guideLogs", "guideShared", "guideFolder"}) {
                     click(new LauncherText("fa").get(key));
                     app.frame().validate();
                     if (rail != helpRailHeight("fa")) throw new AssertionError("Help sidebar changed height: " + key);
@@ -118,13 +118,17 @@ class LauncherSettingsUiTest {
                 app.frame().validate();
                 if (!Boolean.TRUE.equals(button(new LauncherText("en").get("guideLogs")).getClientProperty("selected")))
                     throw new AssertionError("Language change lost the Help topic");
-                for (String key : new String[]{"guideStart", "guidePlayNav", "guideFix", "guideLogs", "guideFolder"})
+                for (String key : new String[]{"guideStart", "guidePlayNav", "guideFix", "guideLogs", "guideShared", "guideFolder"})
                     click(new LauncherText("en").get(key));
                 language("fa");
                 click("پوشهٔ پروفایل چیست؟");
                 click("کپی مسیر");
                 if (!"%LOCALAPPDATA%\\Gunnertimes\\profiles\\Gunnertimes".equals(copiedPath.get()))
                     throw new AssertionError("Copied profile path is incorrect");
+                click(new LauncherText("fa").get("guideShared"));
+                click("کپی مسیر");
+                if (!"%APPDATA%\\.minecraft".equals(copiedPath.get()))
+                    throw new AssertionError("Copied shared Minecraft path is incorrect");
                 System.out.println("PASS: Dastkhat static weights, mixed text, ZWNJ shaping, Help navigation and path copy.");
                 System.out.println("PASS: native focus traversal in both languages, accessible navigation, draft retention, invalid RAM, Save, Cancel, and RTL technical fields.");
             } catch (Exception error) {

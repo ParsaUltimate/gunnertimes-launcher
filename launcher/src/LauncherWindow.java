@@ -590,11 +590,11 @@ final class LauncherWindow {
         body.add(header, BorderLayout.PAGE_START);
         var layout = panel(new BorderLayout(18, 0), BG);
         var menu = stack(BG, 4);
-        String[] topics = {"guideFolder", "guideStart", "guideActions", "guideFix", "guideLogs"};
+        String[] topics = {"guideFolder", "guideStart", "guideActions", "guideFix", "guideLogs", "guideShared"};
         var article = stack(BG, 15);
         article.setBorder(BorderFactory.createCompoundBorder(BorderFactory.createMatteBorder(
             0, text.rtl ? 0 : 1, 0, text.rtl ? 1 : 0, EDGE), new EmptyBorder(10, 20, 23, 20)));
-        String[] icons = {"folder", "play", "server", "download", "document"};
+        String[] icons = {"folder", "play", "server", "download", "document", "folder"};
         for (int i = 0; i < topics.length; i++) {
             int topic = i;
             String navLabel = t(i == 2 ? "guidePlayNav" : topics[i]);
@@ -624,7 +624,7 @@ final class LauncherWindow {
         description.setFont(font(compact ? 15 : 19, false));
         description.setBackground(BG);
         article.add(description);
-        if (helpTopic == 0) {
+        if (topic.equals("guideFolder")) {
             article.add(label(t("guideDefault"), 14, true, MUTED));
             article.add(copyPath("%LOCALAPPDATA%\\Gunnertimes\\profiles\\Gunnertimes"));
             article.add(label(t("guideExisting"), 14, true, MUTED));
@@ -637,7 +637,10 @@ final class LauncherWindow {
             hint.setBackground(BG);
             article.add(hint);
         }
-        if (helpTopic == 0 || helpTopic == 4) {
+        if (topic.equals("guideShared")) {
+            article.add(copyPath("%APPDATA%\\.minecraft"));
+        }
+        if (topic.equals("guideFolder") || topic.equals("guideLogs")) {
             var row = panel(new FlowLayout(FlowLayout.LEADING, 0, 0), PANEL);
             var logs = button(t("openLogs"), false);
             logs.putClientProperty("outlined", true);
