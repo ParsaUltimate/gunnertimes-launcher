@@ -75,6 +75,7 @@ if (!$JarOnly) {
     Copy-Item -LiteralPath $portable -Destination (Join-Path $inputFiles 'GunnertimesLauncher.jar')
     & "$jdk/bin/jpackage.exe" --type app-image --name 'Gunnertimes' --app-version $Version --vendor 'Gunnertimes' `
         --input $inputFiles.FullName --main-jar GunnertimesLauncher.jar --dest $stage.FullName `
+        --icon "$PSScriptRoot/packaging/gunnertimes.ico" `
         --java-options '-Dgunnertimes.installed=true' `
         --add-modules 'java.se,jdk.unsupported,jdk.crypto.ec,jdk.management,jdk.zipfs,jdk.charsets,jdk.localedata,jdk.jfr,jdk.management.jfr' `
         --jlink-options '--strip-debug --no-man-pages --no-header-files'

@@ -24,7 +24,8 @@ final class LauncherWindow {
 
     private final java.util.function.Consumer<String> copyToClipboard;
     private final JFrame frame = new JFrame("Gunnertimes");
-    private final BufferedImage art = loadArt();
+    private final BufferedImage art = loadImage("gunnertimes-hero.png");
+    private final BufferedImage logo = loadImage("gunnertimes-icon.png");
     private LauncherText text;
     private GunnertimesLauncher.Preferences settings;
     private LauncherSession session = new LauncherSession();
@@ -66,6 +67,7 @@ final class LauncherWindow {
     }
 
     void show() {
+        if (logo != null) frame.setIconImage(logo);
         frame.setDefaultCloseOperation(JFrame.DO_NOTHING_ON_CLOSE);
         frame.setFocusTraversalPolicy(new ContainerOrderFocusTraversalPolicy());
         frame.addWindowListener(new WindowAdapter() {
@@ -147,7 +149,10 @@ final class LauncherWindow {
             new EmptyBorder(10, 18, 10, 18)));
         var brand = panel(new BorderLayout(9, 0), RAIL);
         var mark = label("", 20, true, GOLD);
-        mark.setIcon(navigationIcon(Page.PACK));
+        if (logo != null) {
+            int size = compact ? 24 : 34;
+            mark.setIcon(new ImageIcon(logo.getScaledInstance(size, size, Image.SCALE_SMOOTH)));
+        }
         brand.add(mark, BorderLayout.LINE_START);
         var wordmark = panel(new BorderLayout(), null);
         wordmark.add(label("Gunnertimes", compact ? 19 : 27, true, TEXT), BorderLayout.PAGE_START);
@@ -627,8 +632,6 @@ final class LauncherWindow {
         if (topic.equals("guideFolder")) {
             article.add(label(t("guideDefault"), 14, true, MUTED));
             article.add(copyPath("%LOCALAPPDATA%\\Gunnertimes\\profiles\\Gunnertimes"));
-            article.add(label(t("guideExisting"), 14, true, MUTED));
-            article.add(copyPath("%APPDATA%\\.minecraft\\versions\\Goharian New Server"));
             var divider = new JSeparator();
             divider.setForeground(EDGE);
             article.add(divider);
@@ -1465,8 +1468,8 @@ final class LauncherWindow {
         return pane;
     }
 
-    private static BufferedImage loadArt() {
-        try (var source = LauncherWindow.class.getResourceAsStream("/gunnertimes-hero.png")) {
+    private static BufferedImage loadImage(String file) {
+        try (var source = LauncherWindow.class.getResourceAsStream("/" + file)) {
             return source == null ? null : ImageIO.read(source);
         } catch (IOException ignored) {
             return null;

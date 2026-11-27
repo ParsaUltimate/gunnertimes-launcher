@@ -34,7 +34,7 @@ Use the globe in the top navigation to switch between English and فارسی. Th
 
 Gunnertimes resolves the shared location automatically from the current Windows user. It creates the required directories when preparing the game. It can reuse verified files from the older launcher cache to fill gaps, or download and verify missing and damaged files from the official Minecraft and Fabric sources. The game then reads the shared files in `.minecraft`. See the resolved path in **Settings → Downloads & updates**.
 
-A profile can live anywhere writable. For example, someone already using Goharian New Server can select `%APPDATA%\.minecraft\versions\Goharian New Server` to reuse that profile's mods, settings and worlds. If you select its `mods` folder, the launcher uses the parent directory.
+A profile can live anywhere writable. For an existing instance, use the folder that contains its mods, settings and worlds. If you select its `mods` folder, the launcher uses the parent directory.
 
 ## What the launcher does
 
@@ -57,6 +57,10 @@ Launcher updates and pack updates are independent. Gunnertimes checks for launch
 **Settings in English**
 
 ![English Java and memory settings with the seven settings sections](docs/screenshots/settings-en.png)
+
+**Help in Persian**
+
+![Persian Help showing the default profile and shared Minecraft files topic](docs/screenshots/help-fa.png)
 
 </details>
 
