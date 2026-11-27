@@ -46,8 +46,9 @@ final class PackService {
     }
 
     Release installed(Path profile) throws Exception {
-        Path state = profile.resolve(Updater.STATE);
-        if (Files.isDirectory(state) && !state.toRealPath().equals(state.toAbsolutePath().normalize()))
+        if (!Files.isDirectory(profile)) return null;
+        Path state = profile.toRealPath().resolve(Updater.STATE);
+        if (Files.isDirectory(state) && !state.toRealPath().equals(state))
             throw new IOException("Linked updater directory.");
         Path file = state.resolve(SIGNED);
         if (!Files.isRegularFile(file)) return null;

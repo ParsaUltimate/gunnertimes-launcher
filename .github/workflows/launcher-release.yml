@@ -5,6 +5,11 @@ on:
     tags:
       - 'launcher-v*'
   workflow_dispatch:
+    inputs:
+      release_tag:
+        description: Existing launcher tag to publish or retry. Leave empty for a build-only run.
+        required: false
+        type: string
 
 permissions:
   contents: read
@@ -19,22 +24,29 @@ jobs:
     steps:
       - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
         with:
+          ref: ${{ inputs.release_tag || github.ref }}
           fetch-depth: 0
           persist-credentials: false
       - name: Validate release tag and build
         id: build
         shell: pwsh
+        env:
+          RETRY_RELEASE_TAG: ${{ inputs.release_tag }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
-          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+          $tag = $env:RETRY_RELEASE_TAG
+          if ($env:GITHUB_REF_TYPE -eq 'tag' -and !$tag) { $tag = $env:GITHUB_REF_NAME }
+          if ($tag) {
             $version = (Get-Content launcher/resources/launcher-version.txt -Raw).Trim()
-            if ($env:GITHUB_REF_NAME -cne "launcher-v$version") { throw 'Tag and launcher version differ.' }
+            if ($tag -cne "launcher-v$version") { throw 'Tag and launcher version differ.' }
+            if ((git rev-parse "refs/tags/$tag^{commit}") -ne (git rev-parse HEAD)) { throw 'The checked-out commit is not the selected tag.' }
             git merge-base --is-ancestor HEAD origin/main
           }
           $files = ./launcher/build.ps1
           $stage = Split-Path -Parent ($files | Select-Object -Last 1)
           "stage=$stage" >> $env:GITHUB_OUTPUT
+          "tag=$tag" >> $env:GITHUB_OUTPUT
           ./launcher/test.ps1 -ApplicationImage (Join-Path $stage 'Gunnertimes')
       - name: Save tested Windows packages
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
@@ -45,10 +57,11 @@ jobs:
             ${{ steps.build.outputs.stage }}/Gunnertimes-Setup.exe
             ${{ steps.build.outputs.stage }}/Gunnertimes-Portable.jar
       - name: Publish signed public release
-        if: github.event_name == 'push' && github.ref_type == 'tag'
+        if: steps.build.outputs.tag != ''
         shell: pwsh
         env:
           GH_TOKEN: ${{ secrets.LAUNCHER_RELEASE_TOKEN }}
           LAUNCHER_SIGNING_KEY: ${{ secrets.LAUNCHER_SIGNING_KEY }}
           LAUNCHER_BUILD_STAGE: ${{ steps.build.outputs.stage }}
-        run: ./launcher/packaging/publish-release.ps1 -Stage $env:LAUNCHER_BUILD_STAGE -Tag $env:GITHUB_REF_NAME
+          LAUNCHER_RELEASE_TAG: ${{ steps.build.outputs.tag }}
+        run: ./launcher/packaging/publish-release.ps1 -Stage $env:LAUNCHER_BUILD_STAGE -Tag $env:LAUNCHER_RELEASE_TAG

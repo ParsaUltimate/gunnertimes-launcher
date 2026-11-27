@@ -91,7 +91,7 @@ The build prints the paths to the installer and portable JAR. Use `-JarOnly` for
 
 ## Automated launcher releases
 
-GitHub Actions builds and tests a version on Windows when its `launcher-vX.Y.Z` tag is pushed. Update `launcher/resources/launcher-version.txt` on `main` before tagging. A manual workflow run builds and tests without publishing.
+GitHub Actions builds and tests a version on Windows when its `launcher-vX.Y.Z` tag is pushed. Update `launcher/resources/launcher-version.txt` on `main` before tagging. A manual run on `main` builds and tests when the release tag field is empty. Supply an existing tag there to retry a tagged release.
 
 Configure these Actions secrets in the source repository once:
 

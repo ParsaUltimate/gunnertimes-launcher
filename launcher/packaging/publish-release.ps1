@@ -22,10 +22,11 @@ if ([version]$existing.version -ge [version]$version) { throw 'The stable channe
 
 $notes = Join-Path $Stage 'notes.md'
 $signed = Join-Path $Stage 'signed-body.md'
+$revision = git rev-parse HEAD
 @"
 Windows x64. Setup includes Java 25. The Portable JAR requires Java 25 x64.
 
-Launcher source revision: $env:GITHUB_SHA.
+Launcher source revision: $revision.
 [Bundled OpenJDK source](https://github.com/microsoft/openjdk-jdk25u/tree/release/jdk-25.0.2_10)
 "@ | Set-Content -LiteralPath $notes -Encoding utf8
 $classes = New-Item -ItemType Directory -Force (Join-Path $Stage 'signing-classes')
