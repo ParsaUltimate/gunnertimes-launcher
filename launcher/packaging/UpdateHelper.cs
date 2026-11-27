@@ -57,6 +57,14 @@ internal static class UpdateHelper
                 try { File.Replace(backup, target, null); }
                 catch { detail += Environment.NewLine + "Previous JAR: " + backup; }
             }
+            if (File.Exists(target))
+            {
+                try { using (Relaunch(installed, target, java)) { } }
+                catch (Exception restartFailure)
+                {
+                    detail += Environment.NewLine + "Could not reopen Gunnertimes: " + restartFailure.Message;
+                }
+            }
             try { File.WriteAllText(payload + ".failure.log", detail); }
             catch (IOException) { }
             string message = args[6] == "true"
@@ -64,11 +72,6 @@ internal static class UpdateHelper
                 : "The launcher update could not finish. Check folder access and try again.";
             MessageBox.Show(message + "\r\n\r\n" + detail, "Gunnertimes",
                 MessageBoxButtons.OK, MessageBoxIcon.Error);
-            if (File.Exists(target))
-            {
-                try { using (Relaunch(installed, target, java)) { } }
-                catch { }
-            }
             return 1;
         }
         finally

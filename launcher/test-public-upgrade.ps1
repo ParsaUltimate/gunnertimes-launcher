@@ -106,30 +106,6 @@ try {
     if ((Get-FileHash -LiteralPath $jar -Algorithm SHA512).Hash -ne $initialHash) { throw 'Cancel changed the launcher.' }
     Action 'frame|Check for launcher updates'
     if ($Installed -and !$SkipLockProbe) {
-        Add-Type @'
-using System;
-using System.Runtime.InteropServices;
-public static class UpgradeDialog {
-    private delegate bool Visit(IntPtr hwnd, IntPtr unused);
-    [DllImport("user32.dll")] private static extern bool EnumWindows(Visit visit, IntPtr unused);
-    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
-    [DllImport("user32.dll")] private static extern IntPtr GetDlgItem(IntPtr hwnd, int id);
-    [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
-    public static bool Acknowledge(uint pid) {
-        bool sent = false;
-        EnumWindows((hwnd, unused) => {
-            uint owner;
-            GetWindowThreadProcessId(hwnd, out owner);
-            if (owner != pid) return true;
-            IntPtr ok = GetDlgItem(hwnd, 1);
-            if (ok == IntPtr.Zero) return true;
-            sent = PostMessage(hwnd, 0x111, new IntPtr(1), ok);
-            return !sent;
-        }, IntPtr.Zero);
-        return sent;
-    }
-}
-'@
         $updates = Join-Path $upgradeData 'launcher-updates'
         $lockFile = Join-Path $previous.Path 'qa-locked-file'
         $lock = [IO.File]::Open($lockFile, 'CreateNew', 'ReadWrite', 'None')
@@ -147,21 +123,15 @@ public static class UpgradeDialog {
             $lock.Dispose()
             Remove-Item -LiteralPath $lockFile
         }
-        try {
-            Await 'previous version reopened after dismissing the native error dialog' {
-                if ((Get-Content -LiteralPath $oldRunning -Raw) -ne "$mode $previousPid") { return $true }
-                $helper = Get-Process -Name 'helper-*' -ErrorAction SilentlyContinue |
-                    Where-Object { $_.Path -like "$updates*" } | Select-Object -First 1
-                if ($helper) { [void][UpgradeDialog]::Acknowledge($helper.Id) }
-                return $false
-            } 40
-        } catch {
-            Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='.NET Runtime';StartTime=(Get-Date).AddMinutes(-3)} -ErrorAction SilentlyContinue |
-                Where-Object Message -Match 'helper-' | Select-Object -ExpandProperty Message |
-                Tee-Object -FilePath (Join-Path $Evidence 'native-recovery-error.txt')
-            throw
-        }
+        Await 'previous version reopened without dismissing the native error dialog' {
+            (Get-Content -LiteralPath $oldRunning -Raw) -ne "$mode $previousPid"
+        } 40
         if ((Get-FileHash -LiteralPath $jar -Algorithm SHA512).Hash -ne $initialHash) { throw 'Locked update changed the launcher.' }
+        $previousPid = [int]((Get-Content $oldRunning).Split(' ')[1])
+        Get-Process -Name 'helper-*' -ErrorAction SilentlyContinue |
+            Where-Object { $_.Path -like "$updates*" } | ForEach-Object { [void]$_.CloseMainWindow() }
+        'PASS: locked file stopped Setup, previous build reopened, and old JAR hash matched.' |
+            Add-Content -LiteralPath (Join-Path $Evidence 'locked-destination.txt')
     }
     Action 'dialog|Update and restart|05-retry'
     $newRunning = Join-Path $Evidence "running-$ExpectedVersion"

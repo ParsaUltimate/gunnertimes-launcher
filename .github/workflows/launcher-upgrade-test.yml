@@ -12,8 +12,8 @@ on:
         default: '1.4.5'
         type: string
       test_lock:
-        description: Check that a locked file leaves the old launcher usable.
-        default: true
+        description: Build the baseline from this source and exercise locked-file recovery.
+        default: false
         type: boolean
 
 permissions:
@@ -46,6 +46,12 @@ jobs:
               ExpectedVersion = $env:EXPECTED_VERSION
               SkipLockProbe = $env:TEST_LOCK -ne 'true'
           }
+          if ($env:TEST_LOCK -eq 'true') {
+              $outputs = ./launcher/build.ps1 -JdkHome $jdk -Version $env:BASELINE_VERSION
+              $setup = $outputs | Where-Object { $_ -like '*Gunnertimes-Setup.exe' } | Select-Object -Last 1
+              ./launcher/test-public-upgrade.ps1 @common -OlderVersion $env:BASELINE_VERSION -OlderSetup $setup -Evidence "$report/recovery"
+              exit
+          }
           try {
               ./launcher/test-public-upgrade.ps1 @common -OlderVersion $env:BASELINE_VERSION -Evidence "$report/public"
           } catch {
@@ -65,4 +71,3 @@ jobs:
             ${{ runner.temp }}/launcher-upgrade-report/*/*.png
             ${{ runner.temp }}/launcher-upgrade-report/*/result.txt
             ${{ runner.temp }}/launcher-upgrade-report/*/locked-destination.txt
-            ${{ runner.temp }}/launcher-upgrade-report/*/native-recovery-error.txt
