@@ -2,6 +2,19 @@ name: Test public launcher upgrade
 
 on:
   workflow_dispatch:
+    inputs:
+      baseline:
+        description: Older public launcher build to install.
+        default: '1.4.1'
+        type: string
+      expected:
+        description: Expected launcher version in the public stable channel.
+        default: '1.4.5'
+        type: string
+      test_lock:
+        description: Check that a locked file leaves the old launcher usable.
+        default: true
+        type: boolean
 
 permissions:
   contents: read
@@ -17,22 +30,32 @@ jobs:
           persist-credentials: false
       - name: Test the public installer and update action
         shell: pwsh
+        env:
+          BASELINE_VERSION: ${{ inputs.baseline }}
+          EXPECTED_VERSION: ${{ inputs.expected }}
+          TEST_LOCK: ${{ inputs.test_lock }}
         run: |
           $ErrorActionPreference = 'Stop'
           $PSNativeCommandUseErrorActionPreference = $true
           ./launcher/build.ps1 -JarOnly
           $jdk = (Resolve-Path launcher/build/toolchain/jdk-25.0.2+10).Path
           $report = Join-Path $env:RUNNER_TEMP 'launcher-upgrade-report'
+          $common = @{
+              Installed = $true
+              Jdk = $jdk
+              ExpectedVersion = $env:EXPECTED_VERSION
+              SkipLockProbe = $env:TEST_LOCK -ne 'true'
+          }
           try {
-              ./launcher/test-public-upgrade.ps1 -Installed -Jdk $jdk -Evidence "$report/public"
+              ./launcher/test-public-upgrade.ps1 @common -OlderVersion $env:BASELINE_VERSION -Evidence "$report/public"
           } catch {
-              if ($_.Exception.Message -notlike 'Baseline installer*') { throw }
+              if ($env:BASELINE_VERSION -ne '1.4.1' -or $_.Exception.Message -notlike 'Baseline installer*') { throw }
               $_.Exception.Message | Set-Content "$report/public/result.txt"
               $previous = Join-Path $env:RUNNER_TEMP 'source-1.4.3'
               git worktree add --detach $previous launcher-v1.4.3
               $outputs = & "$previous/launcher/build.ps1" -JdkHome $jdk
               $setup = $outputs | Where-Object { $_ -like '*Gunnertimes-Setup.exe' } | Select-Object -Last 1
-              ./launcher/test-public-upgrade.ps1 -Installed -Jdk $jdk -Evidence "$report/fallback" -OlderVersion 1.4.3 -OlderSetup $setup
+              ./launcher/test-public-upgrade.ps1 @common -Evidence "$report/fallback" -OlderVersion 1.4.3 -OlderSetup $setup
           }
       - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
         if: always()

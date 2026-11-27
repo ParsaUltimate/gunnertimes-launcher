@@ -2,8 +2,9 @@ param(
     [Parameter(Mandatory)][string]$Evidence,
     [Parameter(Mandatory)][string]$Jdk,
     [switch]$Installed,
-    [string]$OlderVersion = '1.4.1',
-    [string]$ExpectedVersion = '1.4.5',
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$OlderVersion = '1.4.1',
+    [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$ExpectedVersion = '1.4.5',
+    [switch]$SkipLockProbe,
     [string]$OlderSetup
 )
 $ErrorActionPreference = 'Stop'
@@ -102,7 +103,7 @@ try {
     Action 'dialog|Cancel|03-interrupted-download'
     if ((Get-FileHash -LiteralPath $jar -Algorithm SHA512).Hash -ne $initialHash) { throw 'Cancel changed the launcher.' }
     Action 'frame|Check for launcher updates'
-    if ($Installed) {
+    if ($Installed -and !$SkipLockProbe) {
         Add-Type @'
 using System;
 using System.Runtime.InteropServices;
