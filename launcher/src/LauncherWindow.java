@@ -23,6 +23,7 @@ final class LauncherWindow {
     private enum Page { PLAY, PACK, SETTINGS, HELP }
 
     private final java.util.function.Consumer<String> copyToClipboard;
+    private final java.util.concurrent.Callable<LauncherUpdates.Release> launcherUpdateLookup;
     private final JFrame frame = new JFrame("Gunnertimes");
     private final BufferedImage art = loadImage("gunnertimes-hero.png");
     private final BufferedImage logo = loadImage("gunnertimes-icon.png");
@@ -39,6 +40,7 @@ final class LauncherWindow {
     private JButton activeHelpTopic, languageButton;
     private boolean checkingLauncher, updatingLauncher;
     private LauncherUpdates.Release launcherRelease;
+    private String launcherCheckStatus = "launcherCheckIdle";
     private boolean checking, catalogReady, serverChecking = true;
     private boolean progressed, minimized;
     private GunnertimesLauncher.Action lastAction;
@@ -61,7 +63,13 @@ final class LauncherWindow {
     }
 
     LauncherWindow(GunnertimesLauncher.Preferences settings, java.util.function.Consumer<String> copyToClipboard) {
+        this(settings, copyToClipboard, LauncherUpdates::check);
+    }
+
+    LauncherWindow(GunnertimesLauncher.Preferences settings, java.util.function.Consumer<String> copyToClipboard,
+            java.util.concurrent.Callable<LauncherUpdates.Release> launcherUpdateLookup) {
         this.copyToClipboard = copyToClipboard;
+        this.launcherUpdateLookup = launcherUpdateLookup;
         this.settings = settings;
         text = new LauncherText(settings.language());
     }
@@ -734,26 +742,47 @@ final class LauncherWindow {
 
     void checkLauncher(boolean manual) {
         if (checkingLauncher || updatingLauncher) return;
-        if (manual && launcherRelease != null) {
-            offerLauncherUpdate();
-            return;
-        }
         checkingLauncher = true;
+        launcherRelease = null;
+        launcherCheckStatus = "launcherCheckingNow";
+        refreshLauncherCheck();
         new SwingWorker<LauncherUpdates.Release, Void>() {
-            protected LauncherUpdates.Release doInBackground() throws Exception { return LauncherUpdates.check(); }
+            protected LauncherUpdates.Release doInBackground() throws Exception { return launcherUpdateLookup.call(); }
             protected void done() {
                 checkingLauncher = false;
                 if (!frame.isDisplayable()) return;
                 try {
                     launcherRelease = get();
+                    launcherCheckStatus = launcherRelease == null ? "launcherCurrent" : "launcherNewVersion";
+                    refreshLauncherCheck();
                     if (launcherRelease != null && !busy) offerLauncherUpdate();
-                    else if (manual && launcherRelease == null)
+                    else if (manual && launcherRelease == null && settingsPanel == null)
                         JOptionPane.showMessageDialog(frame, t("launcherCurrent"), t("launcherUpdate"), JOptionPane.INFORMATION_MESSAGE);
                 } catch (Exception failure) {
+                    launcherCheckStatus = "launcherCheckFailed";
+                    refreshLauncherCheck();
                     if (manual) detailDialog(t("launcherCheckFailed"), failure.toString());
                 }
             }
         }.execute();
+    }
+
+    boolean launcherCheckBusy() { return checkingLauncher || updatingLauncher; }
+
+    String launcherCheckMessage() {
+        return t(launcherCheckStatus) + (launcherRelease == null ? "" : " " + ltr(launcherRelease.version()));
+    }
+
+    private void refreshLauncherCheck() {
+        if (settingsPanel != null) settingsPanel.launcherCheckChanged();
+    }
+
+    void openLauncherReleases() {
+        try {
+            Desktop.getDesktop().browse(java.net.URI.create("https://github.com/" + LauncherUpdates.REPOSITORY + "/releases"));
+        } catch (IOException | UnsupportedOperationException failure) {
+            detailDialog(t("launcherCheckFailed"), failure.toString());
+        }
     }
 
     private void offerLauncherUpdate() {
@@ -776,6 +805,7 @@ final class LauncherWindow {
 
     private void applyLauncherUpdate(LauncherUpdates.Artifact asset) {
         updatingLauncher = true;
+        refreshLauncherCheck();
         var progress = new JProgressBar(0, 1000);
         progress.setIndeterminate(true);
         progress.setStringPainted(true);
@@ -803,6 +833,7 @@ final class LauncherWindow {
             protected void done() {
                 dialog.dispose();
                 updatingLauncher = false;
+                refreshLauncherCheck();
                 if (isCancelled()) return;
                 Path payload = null;
                 try {

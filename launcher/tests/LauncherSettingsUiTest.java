@@ -137,5 +137,56 @@ class LauncherSettingsUiTest {
                 if (app != null) app.frame().dispose();
             }
         });
+        aboutChecks();
+    }
+
+    private static void aboutChecks() throws Exception {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        SwingUtilities.invokeAndWait(() -> {
+            app = new LauncherWindow(GunnertimesLauncher.defaults("en"), ignored -> {}, () -> {
+                int call = calls.incrementAndGet();
+                if (call == 2) throw new java.io.IOException("Test connection unavailable");
+                if (call == 3) {
+                    var type = LauncherUpdates.Type.PORTABLE;
+                    var asset = new LauncherUpdates.Artifact(type, type.filename, 1024, "", "");
+                    return new LauncherUpdates.Release("99.0.0", "Test release", java.util.List.of(asset));
+                }
+                return null;
+            });
+            app.show();
+            click("Settings");
+            click("About");
+            button("Official launcher releases");
+        });
+        try {
+            waitForAbout("launcherCurrent", "en");
+            SwingUtilities.invokeAndWait(() -> click("Check for launcher updates"));
+            waitForAbout("launcherCheckFailed", "en");
+            SwingUtilities.invokeAndWait(() -> {
+                language("fa");
+                String label = new LauncherText("fa").get("checkLauncherUpdate");
+                click(label);
+            });
+            waitForAbout("launcherNewVersion", "fa");
+            if (calls.get() != 3) throw new AssertionError("Manual check did not refresh the channel twice");
+            System.out.println("PASS: About shows current, offline and new-version results in English and Persian.");
+        } finally {
+            SwingUtilities.invokeAndWait(() -> app.frame().dispose());
+        }
+    }
+
+    private static void waitForAbout(String key, String locale) throws Exception {
+        var matched = new java.util.concurrent.atomic.AtomicBoolean();
+        String message = new LauncherText(locale).get(key);
+        for (int attempt = 0; attempt < 100; attempt++) {
+            SwingUtilities.invokeAndWait(() -> {
+                matched.set(all(app.frame(), JLabel.class).stream().anyMatch(label -> label.getText().startsWith(message)));
+                if (matched.get()) for (Window window : app.frame().getOwnedWindows())
+                    if (window instanceof JDialog && window.isShowing()) window.dispose();
+            });
+            if (matched.get()) return;
+            Thread.sleep(50);
+        }
+        throw new AssertionError("About did not display " + key);
     }
 }

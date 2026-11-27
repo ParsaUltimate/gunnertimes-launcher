@@ -1,0 +1,54 @@
+name: Windows launcher
+
+on:
+  push:
+    tags:
+      - 'launcher-v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: launcher-release
+  cancel-in-progress: false
+
+jobs:
+  windows:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Validate release tag and build
+        id: build
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          if ($env:GITHUB_REF_TYPE -eq 'tag') {
+            $version = (Get-Content launcher/resources/launcher-version.txt -Raw).Trim()
+            if ($env:GITHUB_REF_NAME -cne "launcher-v$version") { throw 'Tag and launcher version differ.' }
+            git merge-base --is-ancestor HEAD origin/main
+          }
+          $files = ./launcher/build.ps1
+          $stage = Split-Path -Parent ($files | Select-Object -Last 1)
+          "stage=$stage" >> $env:GITHUB_OUTPUT
+          ./launcher/test.ps1 -ApplicationImage (Join-Path $stage 'Gunnertimes')
+      - name: Save tested Windows packages
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: gunnertimes-windows-x64
+          if-no-files-found: error
+          path: |
+            ${{ steps.build.outputs.stage }}/Gunnertimes-Setup.exe
+            ${{ steps.build.outputs.stage }}/Gunnertimes-Portable.jar
+      - name: Publish signed public release
+        if: github.event_name == 'push' && github.ref_type == 'tag'
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ secrets.LAUNCHER_RELEASE_TOKEN }}
+          LAUNCHER_SIGNING_KEY: ${{ secrets.LAUNCHER_SIGNING_KEY }}
+          LAUNCHER_BUILD_STAGE: ${{ steps.build.outputs.stage }}
+        run: ./launcher/packaging/publish-release.ps1 -Stage $env:LAUNCHER_BUILD_STAGE -Tag $env:GITHUB_REF_NAME

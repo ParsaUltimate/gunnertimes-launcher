@@ -9,7 +9,7 @@ import javax.swing.border.EmptyBorder;
 
 final class LauncherSettings {
     private static final String[] SECTIONS = {"general", "profileSection", "displaySection", "javaSection",
-        "downloadSection", "storageSection", "diagnosticSection"};
+        "downloadSection", "storageSection", "diagnosticSection", "aboutSection"};
     private static final String[] MOTION = {"system", "reduce", "full"};
     private static final String[] BEHAVIOR = {"visible", "minimize"};
     private static final String[] DISPLAY = {"saved", "fullscreen", "windowed"};
@@ -34,6 +34,8 @@ final class LauncherSettings {
     private final JCheckBox customResolution;
     private final JLabel feedback;
     private final JButton save;
+    private JButton aboutCheck, downloadsLauncherCheck;
+    private JLabel launcherStatus;
     private final java.util.Map<JComponent, JLabel> fieldErrors = new java.util.IdentityHashMap<>();
     private final JButton[] tabs = new JButton[SECTIONS.length];
     private final java.util.ArrayList<JTextField> javaReadouts = new java.util.ArrayList<>();
@@ -62,7 +64,7 @@ final class LauncherSettings {
         body.add(ui.utilityTitle("navSettings", ui.frame().getWidth() < 1020 ? 33 : 40));
         var layout = LauncherWindow.panel(new BorderLayout(21, 0), LauncherWindow.BG);
         var menu = LauncherWindow.outline(LauncherWindow.stack(LauncherWindow.RAIL, 5), 10);
-        menu.setPreferredSize(new Dimension(ui.frame().getWidth() < 1020 ? 196 : 287, 386));
+        menu.setPreferredSize(new Dimension(ui.frame().getWidth() < 1020 ? 196 : 287, 460));
         for (int index = 0; index < SECTIONS.length; index++) {
             int target = index;
             var action = ui.button(ui.t(SECTIONS[index]), false);
@@ -70,7 +72,7 @@ final class LauncherSettings {
             action.setToolTipText(ui.t(SECTIONS[index]));
             action.addActionListener(event -> switchSection(target));
             tabs[index] = action;
-            String[] icons = {"check", "person", "game", "document", "download", "server", "repair"};
+            String[] icons = {"check", "person", "game", "document", "download", "server", "repair", "document"};
             action.setIcon(new UtilityIcon(icons[index]));
             action.setIconTextGap(9);
             action.setFont(ui.controlFont(ui.frame().getWidth() < 1020 ? 13 : 16));
@@ -79,7 +81,8 @@ final class LauncherSettings {
         }
         layout.add(menu, BorderLayout.LINE_START);
         pages = LauncherWindow.panel(new CardLayout(), LauncherWindow.BG);
-        var renderers = List.of(general(), profile(), display(), java(), downloads(), storage(), diagnostics());
+        var renderers = List.of(general(), profile(), display(), java(), downloads(), storage(), diagnostics(), about());
+        launcherCheckChanged();
         for (int index = 0; index < SECTIONS.length; index++) {
             var wrap = LauncherWindow.panel(new BorderLayout(), LauncherWindow.BG);
             wrap.add(renderers.get(index), BorderLayout.PAGE_START);
@@ -337,10 +340,28 @@ final class LauncherSettings {
             area.add(actions(action("details", () -> ui.detailDialog(ui.t("releaseUnavailable"), ui.checkError()))));
         area.add(new JSeparator());
         add(area, "launcherBuild", readOnly(LauncherUpdates.VERSION));
-        var launcher = action("checkLauncherUpdate", () -> ui.checkLauncher(true));
-        ui.downloadStyle(launcher);
-        area.add(actions(launcher));
+        downloadsLauncherCheck = action("checkLauncherUpdate", () -> ui.checkLauncher(true));
+        ui.downloadStyle(downloadsLauncherCheck);
+        area.add(actions(downloadsLauncherCheck));
         return area;
+    }
+
+    private JPanel about() {
+        var area = section("aboutSection");
+        add(area, "launcherBuild", readOnly(LauncherUpdates.VERSION));
+        aboutCheck = action("checkLauncherUpdate", () -> ui.checkLauncher(true));
+        ui.downloadStyle(aboutCheck);
+        area.add(actions(aboutCheck, action("officialLauncherReleases", ui::openLauncherReleases)));
+        launcherStatus = ui.label("", 14, false, LauncherWindow.TEXT);
+        area.add(launcherStatus);
+        return area;
+    }
+
+    void launcherCheckChanged() {
+        boolean available = !ui.launcherCheckBusy();
+        aboutCheck.setEnabled(available);
+        downloadsLauncherCheck.setEnabled(available);
+        launcherStatus.setText(ui.launcherCheckMessage());
     }
 
     private JPanel storage() {

@@ -72,6 +72,12 @@ Launcher updates and pack updates are independent. Gunnertimes checks for launch
 - **Minecraft did not start or closed.** Select **Open game log** from the progress panel when available. Use **Help → Logs and offline use → Open logs** for launcher and game logs in the active profile.
 - **Playing offline.** Once the official pack and required game files are present, **Play** works offline for single-player. A multiplayer server must accept offline accounts.
 
+## Windows Setup
+
+On a fresh installation, Setup offers the default Windows user folder and a Browse button. Choose an empty or new folder on a local drive. An upgrade shows the folder registered with Windows Installer and uses it for both interactive and silent installation. Setup opens the installed launcher after a successful interactive install.
+
+Visit **Settings → About** to see the installed version, open official releases, or request a new update check.
+
 ## Build and test
 
 Use Windows x64 and PowerShell 7. The build downloads and checksums pinned OpenJDK, Gson and WiX archives into the ignored `launcher/build/toolchain` directory. The native update helper uses the .NET Framework 4 compiler included with supported Windows. From a fresh checkout:
@@ -83,7 +89,18 @@ Use Windows x64 and PowerShell 7. The build downloads and checksums pinned OpenJ
 
 The build prints the paths to the installer and portable JAR. Use `-JarOnly` for the JAR, `-JdkHome` for a local JDK 25 x64, or `-Channel` for an isolated test pack channel. Run `-Ui` on an interactive Windows desktop. Both player builds use `launcher/resources/launcher-version.txt`.
 
-## Release and diagnostics
+## Automated launcher releases
+
+GitHub Actions builds and tests a version on Windows when its `launcher-vX.Y.Z` tag is pushed. Update `launcher/resources/launcher-version.txt` on `main` before tagging. A manual workflow run builds and tests without publishing.
+
+Configure these Actions secrets in the source repository once:
+
+- `LAUNCHER_SIGNING_KEY` is the Base64-encoded current Ed25519 PKCS#8 private key. The signing tool checks it against the public key bundled in the launcher.
+- `LAUNCHER_RELEASE_TOKEN` is a fine-grained GitHub token with Contents read/write for `ParsaUltimate/gunnertimes-releases` only. Enter it directly in the repository’s Actions secrets.
+
+After both release files are public and their SHA-512 hashes match the build, the workflow advances the signed stable channel. If publishing succeeded but the public verification or channel write failed, verify both published files against the signed manifest in the release notes and recover the channel using the same signed body.
+
+## Manual release recovery and diagnostics
 
 1. Increment `launcher/resources/launcher-version.txt` and commit the source. Build both artifacts from that commit with the default toolchain. Preserve the installer upgrade UUID and signed update public key.
 2. With Java 25 on the publishing workstation, compile the signing utility with `javac -encoding UTF-8 -cp "$jar" -d "$signingClasses" launcher/packaging/SignLauncherRelease.java`, where `$jar` is the new portable JAR and `$signingClasses` is an existing working directory. Write plain-text release notes to `$notes`, with the portable Java 25 x64 prerequisite.
