@@ -108,6 +108,7 @@ using System;
 using System.Runtime.InteropServices;
 public static class UpgradeDialog {
     [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
+    [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr hwnd, int id);
 }
 '@
         $updates = Join-Path $upgradeData 'launcher-updates'
@@ -127,14 +128,20 @@ public static class UpgradeDialog {
             $lock.Dispose()
             Remove-Item -LiteralPath $lockFile
         }
-        Await 'native helper error dialog' {
+        Await 'dismiss native helper error dialog' {
             $helper = Get-Process -Name 'helper-*' -ErrorAction SilentlyContinue |
                 Where-Object { $_.Path -like "$updates*" -and $_.MainWindowHandle } | Select-Object -First 1
-            if ($helper) { [UpgradeDialog]::PostMessage($helper.MainWindowHandle, 0x10, 0, 0) }
+            if ($helper) {
+                $dialog = $helper.MainWindowHandle
+                $ok = [UpgradeDialog]::GetDlgItem($dialog, 1)
+                if ($ok -ne [IntPtr]::Zero) {
+                    [UpgradeDialog]::PostMessage($dialog, 0x111, [IntPtr]1, $ok)
+                }
+            }
         }
         Await 'previous version reopened' {
             (Get-Content -LiteralPath $oldRunning -Raw) -ne "$mode $previousPid"
-        }
+        } 30
         if ((Get-FileHash -LiteralPath $jar -Algorithm SHA512).Hash -ne $initialHash) { throw 'Locked update changed the launcher.' }
     }
     Action 'dialog|Update and restart|05-retry'
