@@ -1,82 +1,101 @@
-# Gunnertimes Launcher
+<p align="center"><img src="launcher/resources/gunnertimes-icon.png" width="88" height="88" alt="Gunnertimes cube logo"></p>
 
-Windows x64 launcher for the official Gunnertimes pack, Minecraft 26.3 and Fabric Loader 0.20.1.
+<h1 align="center">Gunnertimes Launcher</h1>
 
-[Download the latest stable build](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest)
+<p align="center">Install the official Gunnertimes modpack and launch Minecraft from one Windows app.</p>
 
-![Gunnertimes Home showing the profile, Play, Join, Update and pack status](docs/screenshots/home-en.png)
+<p align="center">
+  <a href="https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest/download/Gunnertimes-Setup.exe"><strong>Download Windows Setup</strong></a> ·
+  <a href="https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest/download/Gunnertimes-Portable.jar"><strong>Download Portable JAR</strong></a> ·
+  <a href="https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest">Release notes</a>
+</p>
 
-## Install on Windows
+<p align="center"><strong>Windows x64</strong> · Minecraft 26.3 · Fabric Loader 0.20.1 · English / فارسی</p>
 
-| Download | How to run it |
+<p align="center"><a href="#quick-start">Quick start</a> · <a href="#where-files-are-stored">File locations</a> · <a href="#launcher-tour">Launcher tour</a> · <a href="#troubleshooting">Troubleshooting</a></p>
+
+![Gunnertimes 1.4.5 Home on Windows, ready for the first pack installation](docs/screenshots/home-en.png)
+
+## Quick start
+
+### 1. Choose a download
+
+| Edition | Requirements and setup |
 | --- | --- |
-| [Gunnertimes-Setup.exe](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest/download/Gunnertimes-Setup.exe) | Run Setup. Gunnertimes opens when installation is complete and is available from Start or the desktop. Java 25 is included. The installer uses your Windows user account and supports uninstall from Installed apps. |
-| [Gunnertimes-Portable.jar](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest/download/Gunnertimes-Portable.jar) | Install Java 25 x64, put the JAR in a writable folder and run the command below. |
+| **Windows Setup** | Includes Java 25 and installs for the current Windows user. A fresh install defaults to `%LOCALAPPDATA%\Gunnertimes Launcher`. Use **Browse** to choose another new or empty folder on a local drive. Setup opens the launcher after installation. Upgrade installs reuse the registered location. |
+| **Portable JAR** | Requires Java 25 x64. Put the JAR in a writable folder, open a terminal there, and run the command below. Paths can include spaces and Persian characters. |
 
 ```powershell
 java -jar Gunnertimes-Portable.jar
 ```
 
-## First launch
+### 2. Set up your player profile
 
-1. Open **Settings → Player and profile**. Enter an offline username of 3–16 characters using English letters, digits or underscores.
-2. Keep the default profile to create a fresh installation. To reuse an existing profile, choose the directory containing its `mods` folder. Select **Save settings**.
-3. On **Home**, select **Install** and wait for the signed pack to finish installing. Then select **Play** to prepare Minecraft and start the game. Use an internet connection during setup and whenever required files need to be downloaded.
+1. In **Settings → Player and profile**, enter an offline username with 3–16 characters using English letters, digits or underscores.
+2. Keep the default profile for a fresh install. To reuse a profile, select the folder that contains its `mods`, `config` and `saves`. Select **Save settings**.
+3. On **Home**, choose **Install** to download the official pack. Select **Play** when installation finishes. Stay online for the first setup and whenever required files need downloading.
 
-Use the globe in the top navigation to switch between English and فارسی. The launcher remembers your language.
+Use the globe in the top navigation to switch between English and فارسی. The launcher remembers your choice.
+
+<details>
+<summary>راهنمای شروع به فارسی</summary>
+
+<div dir="rtl">
+
+۱. برای نصب عادی، <code>Windows Setup</code> را اجرا کن. جاوا همراه نصاب است و می‌توانی با <code>Browse</code> پوشهٔ نصب را انتخاب کنی. نسخهٔ <code>Portable JAR</code> به جاوای ۲۵ نسخهٔ ۶۴ بیتی نیاز دارد.
+
+۲. از نشان کرهٔ زمین، فارسی را انتخاب کن. در تنظیمات، بخش بازیکن و پروفایل را باز کن. نام کاربری آفلاین باید ۳ تا ۱۶ نویسه و شامل حروف انگلیسی، عدد یا زیرخط باشد. مسیر پیش‌فرض را بپذیر یا پوشهٔ پروفایل خودت را انتخاب کن و تنظیمات را ذخیره کن.
+
+۳. در صفحهٔ اصلی، بستهٔ رسمی را نصب کن و پس از پایان نصب، «بازی» را بزن. برای نصب اول و دریافت فایل‌های موردنیاز، اینترنت لازم است.
+
+</div>
+
+</details>
 
 ## Where files are stored
 
-| Path | What goes there |
+| Location | Purpose |
 | --- | --- |
-| `%APPDATA%\.minecraft` | The **default shared location** for Minecraft and Fabric files. Gunnertimes uses the healthy files in `assets`, `libraries` and `versions` directly from this folder. |
-| `%LOCALAPPDATA%\Gunnertimes\profiles\Gunnertimes` | The default Gunnertimes profile. The selected profile holds your `mods`, `config`, `saves` and `logs`. |
+| `%APPDATA%\.minecraft` | **Default shared Minecraft folder.** The launcher reads healthy `assets`, `libraries` and `versions` directly here, including files you already have. It checks missing or damaged files against official Minecraft and Fabric metadata, reuses verified files from the older launcher cache when available, and downloads what it still needs. |
+| `%LOCALAPPDATA%\Gunnertimes\profiles\Gunnertimes` | **Default Gunnertimes profile.** Your `mods`, `config`, `saves` and game logs go in the selected profile. You can choose another writable folder. If you select an existing `mods` directory, the launcher uses its parent as the profile. |
+| `%LOCALAPPDATA%\Gunnertimes Launcher` | **Default location for the installed application.** Choosing another location in Setup moves the application files for that installation. Profiles and preferences keep their own locations. |
 
-Gunnertimes resolves the shared location automatically from the current Windows user. It creates the required directories when preparing the game. It can reuse verified files from the older launcher cache to fill gaps, or download and verify missing and damaged files from the official Minecraft and Fabric sources. The game then reads the shared files in `.minecraft`. See the resolved path in **Settings → Downloads & updates**.
+See the resolved Minecraft folder in **Settings → Downloads & updates**. Open the active profile and log folders from Settings or Help.
 
-A profile can live anywhere writable. For an existing instance, use the folder that contains its mods, settings and worlds. If you select its `mods` folder, the launcher uses the parent directory.
+## Launcher tour
 
-## What the launcher does
-
-| Area | Actions and information |
+| Page | What you can do |
 | --- | --- |
-| **Home** | **Install** installs the official pack. **Play** starts Minecraft with the installed pack. **Join Gunnertimes** also attempts to connect to the official server. **Update** previews a newer pack before installing it. Home shows installed and available pack versions and server status when available. |
-| **Pack** | Search official mods by name, ID, version or filename. See the installed release and file health. **Verify files** checks the files without changing them. **Repair** previews changes and restores the installed official pack while preserving unrelated files. |
-| **Settings** | Set the player name, profile, display options, Java and RAM. Open the storage and diagnostics pages to find folders, measure disk usage or copy a diagnostic summary. Check for launcher updates in **Downloads & updates**. |
-| **Help** | Find first-launch steps, copy profile paths, understand Play and Join, troubleshoot downloads and mods, and open the logs for the current profile. |
+| **Home** | **Play** starts Minecraft. **Join Gunnertimes** also attempts to connect to the official server. **Update** previews a newer official pack. Home shows the installed pack version and server status when available. |
+| **Pack** | Search official mods and see file health. **Verify files** checks the installed files. **Repair** previews the files to restore, then repairs the installed official release when you confirm. Your unrelated files are preserved. |
+| **Settings** | Choose your language, profile, display options, Java and RAM. Use Storage and Diagnostics to find folders, measure disk usage or copy a diagnostic summary. Open **About** for your launcher version, release links and **Check for launcher updates**. |
+| **Help** | Find first-launch steps, examples of profile paths you can copy, an explanation of Play and Join, recovery steps, and a shortcut to the active logs folder. |
 
-Launcher updates and pack updates are independent. Gunnertimes checks for launcher updates on startup. It verifies the signed release information and the downloaded EXE or JAR before applying a launcher update.
+Launcher updates and pack updates are separate. The launcher checks for its own updates at startup and verifies the signed release information and the downloaded installer or JAR before applying an update.
 
 <details>
-<summary>More launcher screenshots</summary>
+<summary>See Pack, Help and Settings</summary>
 
-**Pack in Persian**
+| Pack · فارسی | Help · فارسی |
+| --- | --- |
+| ![Persian Pack page with official mods and file health](docs/screenshots/pack-fa.png) | ![Persian Help explaining the profile folder and showing the Open logs action](docs/screenshots/help-fa.png) |
 
-![Persian Pack screen with official mod names, versions and verification status](docs/screenshots/pack-fa.png)
+**Settings → About**
 
-**Settings in English**
-
-![English Java and memory settings with the seven settings sections](docs/screenshots/settings-en.png)
-
-**Help in Persian**
-
-![Persian Help showing the default profile and shared Minecraft files topic](docs/screenshots/help-fa.png)
+![Gunnertimes 1.4.5 About page with the manual launcher update action](docs/screenshots/settings-en.png)
 
 </details>
 
 ## Troubleshooting
 
-- **Setup failed.** Note the error code shown in Setup. The installation log is under `%LOCALAPPDATA%\Gunnertimes\setup-logs`.
-- **Download failed.** Reconnect and select **Try again**. Already verified files can be reused.
-- **Official mod damaged.** Close Minecraft, go to **Pack → Verify files**, then preview and confirm **Repair**. If the launcher names a conflicting manual mod, back it up and move it outside the profile’s `mods` folder before retrying.
-- **Minecraft did not start or closed.** Select **Open game log** from the progress panel when available. Use **Help → Logs and offline use → Open logs** for launcher and game logs in the active profile.
-- **Playing offline.** Once the official pack and required game files are present, **Play** works offline for single-player. A multiplayer server must accept offline accounts.
+- **Setup failed.** Note the error code and check `%LOCALAPPDATA%\Gunnertimes\setup-logs`.
+- **Download failed.** Reconnect and select **Try again**. The launcher reuses files that pass verification.
+- **An official mod is damaged.** Close Minecraft and open **Pack → Verify files**. Preview and confirm **Repair**. If the launcher names a conflicting manual mod, back it up and move it outside the profile’s `mods` folder before retrying.
+- **Minecraft closed or failed to open.** Select **Open game log** in the progress panel when available. For both launcher and game logs, use **Help → Logs and offline use → Open logs**.
+- **Playing offline.** Once the pack and required game files are present, **Play** works offline for single-player. Joining a multiplayer server requires that server to accept offline accounts.
 
-## Windows Setup
-
-On a fresh installation, Setup offers the default Windows user folder and a Browse button. Choose an empty or new folder on a local drive. An upgrade shows the folder registered with Windows Installer and uses it for both interactive and silent installation. Setup opens the installed launcher after a successful interactive install.
-
-Visit **Settings → About** to see the installed version, open official releases, or request a new update check.
+<details>
+<summary>For maintainers · build, test and publish</summary>
 
 ## Build and test
 
@@ -105,8 +124,8 @@ After both release files are public and their SHA-512 hashes match the build, th
 1. Increment `launcher/resources/launcher-version.txt` and commit the source. Build both artifacts from that commit with the default toolchain. Preserve the installer upgrade UUID and signed update public key.
 2. With Java 25 on the publishing workstation, compile the signing utility with `javac -encoding UTF-8 -cp "$jar" -d "$signingClasses" launcher/packaging/SignLauncherRelease.java`, where `$jar` is the new portable JAR and `$signingClasses` is an existing working directory. Write plain-text release notes to `$notes`, with the portable Java 25 x64 prerequisite.
 3. Generate the signed body with `java -cp "$jar;$signingClasses" SignLauncherRelease sign "$artifactDir" "$privateKey" "$notes" "$signedBody"`. The private key is a PKCS#8 Ed25519 file stored outside the repository. The signer verifies it against the bundled public key. Preserve the signing key for future updates and keep a secured backup. A new, independent channel can bootstrap a key pair with `SignLauncherRelease generate-key PRIVATE_FILE PUBLIC_FILE` before its first build.
-4. Create a draft in `ParsaUltimate/gunnertimes-releases` with tag `launcher-vX.Y.Z` using `gh release create`, `--notes-file "$signedBody"` and the two player assets. Check file sizes and names, then publish as stable with `gh release edit launcher-vX.Y.Z --draft=false --latest`. Link the private source revision and [matching OpenJDK source](https://github.com/microsoft/openjdk-jdk25u/tree/release/jdk-25.0.2_10) in the notes.
-5. Confirm the GitHub release is neither a draft nor a prerelease, and both asset URLs work without authentication. In the public releases repository, commit the same signed body as `launcher-stable.md` on `main`. The client reads that signed file anonymously, then downloads the matching artifact from GitHub Releases. Leave this file untouched for prereleases. Only the publisher needs GitHub credentials.
+4. Create a draft in `ParsaUltimate/gunnertimes-releases` with tag `launcher-vX.Y.Z` using `gh release create`, `--notes-file "$signedBody"` and the two player assets. Check file sizes and names, then publish with `gh release edit launcher-vX.Y.Z --draft=false --latest=false`. Link the source revision and [matching OpenJDK source](https://github.com/microsoft/openjdk-jdk25u/tree/release/jdk-25.0.2_10) in the notes.
+5. Confirm the GitHub release is neither a draft nor a prerelease, and both asset URLs work without authentication. In the public releases repository, commit the same signed body as `launcher-stable.md` on `main`. The client reads that signed file anonymously, then downloads the matching artifact from GitHub Releases. Leave this file untouched for prereleases. Mark the verified stable release as latest after updating the channel. Only the publisher needs GitHub credentials.
 
 Installed release state is pinned by `.gunnertimes/signed-release.json`. Updates commit it in the same transaction as payloads and ownership. Repair replaces damaged owned files only after confirmation and retains their originals in the transaction backup. Treat versions as immutable and increment the version for each pack change.
 
@@ -119,3 +138,5 @@ Launcher and Minecraft logs are in the selected profile's `logs` folder. The Set
 [Gunnertimes pack releases](https://github.com/ParsaUltimate/gunnertimes-releases) · [Lunar launcher](https://www.lunarclient.com/news/the-new-launcher-is-here) · [Lunar settings](https://www.lunarclient.com/news/lunar-client-monthly-recap-14-may-2025) · [XMCL launch implementation](https://github.com/Voxelum/minecraft-launcher-core-node/blob/master/packages/core/launch.ts)
 
 Persian UI typography uses the official Dastkhat Main static Regular, Medium and SemiBold files. The TTFs load directly from the application JAR. The package includes the OFL notice and pinned source in `licenses/Dastkhat`. [Dastkhat v1.220 source](https://github.com/dastyar-io/dastkhat-font/tree/19f4a12b56a89567b07e02500f0e4aed670e3644)
+
+</details>
