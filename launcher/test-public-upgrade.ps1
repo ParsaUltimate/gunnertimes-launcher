@@ -5,7 +5,8 @@ param(
     [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$OlderVersion = '1.4.1',
     [ValidatePattern('^[0-9]+\.[0-9]+\.[0-9]+$')][string]$ExpectedVersion = '1.4.5',
     [switch]$SkipLockProbe,
-    [string]$OlderSetup
+    [string]$OlderSetup,
+    [string]$OlderJar
 )
 $ErrorActionPreference = 'Stop'
 $PSNativeCommandUseErrorActionPreference = $true
@@ -82,7 +83,8 @@ try {
     } else {
         $portable = (New-Item -ItemType Directory (Join-Path $fixture 'Portable launcher فارسی')).FullName
         $jar = Join-Path $portable 'Gunnertimes-Portable.jar'
-        Download $OlderVersion 'Gunnertimes-Portable.jar' $jar
+        if ($OlderJar) { Copy-Item -LiteralPath $OlderJar -Destination $jar }
+        else { Download $OlderVersion 'Gunnertimes-Portable.jar' $jar }
     }
     $mode = if ($Installed) {'installed'} else {'portable'}
     $initialHash = (Get-FileHash -LiteralPath $jar -Algorithm SHA512).Hash
@@ -108,8 +110,24 @@ try {
 using System;
 using System.Runtime.InteropServices;
 public static class UpgradeDialog {
-    [DllImport("user32.dll")] public static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
-    [DllImport("user32.dll")] public static extern IntPtr GetDlgItem(IntPtr hwnd, int id);
+    private delegate bool Visit(IntPtr hwnd, IntPtr unused);
+    [DllImport("user32.dll")] private static extern bool EnumWindows(Visit visit, IntPtr unused);
+    [DllImport("user32.dll")] private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint pid);
+    [DllImport("user32.dll")] private static extern IntPtr GetDlgItem(IntPtr hwnd, int id);
+    [DllImport("user32.dll")] private static extern bool PostMessage(IntPtr hwnd, uint message, IntPtr wparam, IntPtr lparam);
+    public static bool Acknowledge(uint pid) {
+        bool sent = false;
+        EnumWindows((hwnd, unused) => {
+            uint owner;
+            GetWindowThreadProcessId(hwnd, out owner);
+            if (owner != pid) return true;
+            IntPtr ok = GetDlgItem(hwnd, 1);
+            if (ok == IntPtr.Zero) return true;
+            sent = PostMessage(hwnd, 0x111, new IntPtr(1), ok);
+            return !sent;
+        }, IntPtr.Zero);
+        return sent;
+    }
 }
 '@
         $updates = Join-Path $upgradeData 'launcher-updates'
@@ -129,20 +147,20 @@ public static class UpgradeDialog {
             $lock.Dispose()
             Remove-Item -LiteralPath $lockFile
         }
-        Await 'dismiss native helper error dialog' {
-            $helper = Get-Process -Name 'helper-*' -ErrorAction SilentlyContinue |
-                Where-Object { $_.Path -like "$updates*" -and $_.MainWindowHandle } | Select-Object -First 1
-            if ($helper) {
-                $dialog = $helper.MainWindowHandle
-                $ok = [UpgradeDialog]::GetDlgItem($dialog, 1)
-                if ($ok -ne [IntPtr]::Zero) {
-                    [UpgradeDialog]::PostMessage($dialog, 0x111, [IntPtr]1, $ok)
-                }
-            }
+        try {
+            Await 'previous version reopened after dismissing the native error dialog' {
+                if ((Get-Content -LiteralPath $oldRunning -Raw) -ne "$mode $previousPid") { return $true }
+                $helper = Get-Process -Name 'helper-*' -ErrorAction SilentlyContinue |
+                    Where-Object { $_.Path -like "$updates*" } | Select-Object -First 1
+                if ($helper) { [void][UpgradeDialog]::Acknowledge($helper.Id) }
+                return $false
+            } 40
+        } catch {
+            Get-WinEvent -FilterHashtable @{LogName='Application';ProviderName='.NET Runtime';StartTime=(Get-Date).AddMinutes(-3)} -ErrorAction SilentlyContinue |
+                Where-Object Message -Match 'helper-' | Select-Object -ExpandProperty Message |
+                Tee-Object -FilePath (Join-Path $Evidence 'native-recovery-error.txt')
+            throw
         }
-        Await 'previous version reopened' {
-            (Get-Content -LiteralPath $oldRunning -Raw) -ne "$mode $previousPid"
-        } 30
         if ((Get-FileHash -LiteralPath $jar -Algorithm SHA512).Hash -ne $initialHash) { throw 'Locked update changed the launcher.' }
     }
     Action 'dialog|Update and restart|05-retry'
@@ -161,9 +179,9 @@ public static class UpgradeDialog {
         $links = @(foreach ($folder in @($shell.SpecialFolders.Item('Programs'),$shell.SpecialFolders.Item('Desktop'))) {
             if (Test-Path $folder) { Get-ChildItem -LiteralPath $folder -Filter '*.lnk' -Recurse }
         })
-        if (!($links | Where-Object { $shell.CreateShortcut($_.FullName).TargetPath -eq $target })) {
-            throw 'No shortcut to the upgraded launcher.'
-        }
+        $shortcut = $links | Where-Object { $shell.CreateShortcut($_.FullName).TargetPath -eq $target } |
+            Select-Object -First 1
+        if (!$shortcut) { throw 'No shortcut to the upgraded launcher.' }
     }
     $publicJar = Join-Path $fixture 'published.jar'
     Download $ExpectedVersion 'Gunnertimes-Portable.jar' $publicJar
@@ -175,6 +193,17 @@ public static class UpgradeDialog {
     Action 'frame|About'
     Action 'frame|Check for launcher updates|06-updated-about'
     Action 'exit|now'
+    if ($Installed) {
+        $updatedPid = [int]($newState.Split(' ')[1])
+        Await 'updated launcher to close before shortcut test' {
+            !(Get-Process -Id $updatedPid -ErrorAction SilentlyContinue)
+        } 20
+        Start-Process -FilePath $shortcut.FullName -WindowStyle Hidden
+        Await 'shortcut reopened the updated launcher' {
+            (Get-Content -LiteralPath $newRunning -Raw) -ne $newState
+        } 30
+        Action 'exit|now'
+    }
     "PASS: $mode $OlderVersion -> $ExpectedVersion. Later, cancelled download, retry, restart, version and preserved player files." |
         Tee-Object -FilePath (Join-Path $Evidence 'result.txt')
 } finally {

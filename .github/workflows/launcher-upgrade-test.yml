@@ -65,3 +65,4 @@ jobs:
             ${{ runner.temp }}/launcher-upgrade-report/*/*.png
             ${{ runner.temp }}/launcher-upgrade-report/*/result.txt
             ${{ runner.temp }}/launcher-upgrade-report/*/locked-destination.txt
+            ${{ runner.temp }}/launcher-upgrade-report/*/native-recovery-error.txt
