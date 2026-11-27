@@ -71,7 +71,14 @@ See the resolved Minecraft folder in **Settings → Downloads & updates**. Open 
 | **Settings** | Choose your language, profile, display options, Java and RAM. Use Storage and Diagnostics to find folders, measure disk usage or copy a diagnostic summary. Open **About** for your launcher version, release links and **Check for launcher updates**. |
 | **Help** | Find first-launch steps, examples of profile paths you can copy, an explanation of Play and Join, recovery steps, and a shortcut to the active logs folder. |
 
-Launcher updates and pack updates are separate. The launcher checks for its own updates at startup and verifies the signed release information and the downloaded installer or JAR before applying an update.
+### Update the launcher or the pack
+
+| What to update | Where to do it |
+| --- | --- |
+| **The Windows app** | Use **Settings → About → Check for launcher updates**, or accept the offer at startup. **Update and restart** verifies the download, then upgrades your current installation or replaces your portable JAR and reopens the launcher. Use **Later** or **Cancel** to keep using your current build. |
+| **The official modpack** | Use **Home → Update** when a newer pack is available. Review the installed and target versions, then select **Continue**. The update applies to the active profile. Use **Pack → Verify files** to check the result. |
+
+See the [Windows update verification report](docs/upgrade-verification.md) for the tested versions, recovery cases and screenshots.
 
 <details>
 <summary>See Pack, Help and Settings</summary>
