@@ -1,0 +1,44 @@
+name: Test public launcher upgrade
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installed:
+    runs-on: windows-2022
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - name: Test the public installer and update action
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          $PSNativeCommandUseErrorActionPreference = $true
+          ./launcher/build.ps1 -JarOnly
+          $jdk = (Resolve-Path launcher/build/toolchain/jdk-25.0.2+10).Path
+          $report = Join-Path $env:RUNNER_TEMP 'launcher-upgrade-report'
+          try {
+              ./launcher/test-public-upgrade.ps1 -Installed -Jdk $jdk -Evidence "$report/public"
+          } catch {
+              if ($_.Exception.Message -notlike 'Baseline installer*') { throw }
+              $_.Exception.Message | Set-Content "$report/public/result.txt"
+              $previous = Join-Path $env:RUNNER_TEMP 'source-1.4.3'
+              git worktree add --detach $previous launcher-v1.4.3
+              $outputs = & "$previous/launcher/build.ps1" -JdkHome $jdk
+              $setup = $outputs | Where-Object { $_ -like '*Gunnertimes-Setup.exe' } | Select-Object -Last 1
+              ./launcher/test-public-upgrade.ps1 -Installed -Jdk $jdk -Evidence "$report/fallback" -OlderVersion 1.4.3 -OlderSetup $setup
+          }
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        if: always()
+        with:
+          name: installed-upgrade-evidence
+          path: |
+            ${{ runner.temp }}/launcher-upgrade-report/*/*.png
+            ${{ runner.temp }}/launcher-upgrade-report/*/result.txt
+            ${{ runner.temp }}/launcher-upgrade-report/*/locked-destination.txt
