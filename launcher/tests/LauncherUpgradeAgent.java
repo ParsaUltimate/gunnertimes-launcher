@@ -48,7 +48,7 @@ public final class LauncherUpgradeAgent {
         if (button == null || !button.isEnabled()) return;
         if (command.length == 3) capture(root, evidence.resolve(command[2] + ".png"));
         Files.delete(request);
-        button.doClick(0);
+        SwingUtilities.invokeLater(() -> button.doClick(0));
     }
 
     static JButton find(Container parent, String label) {

@@ -50,8 +50,8 @@ final class PackUpgradeUiTest {
             await(() -> ui(() -> app.availableVersion().equals(NEW)), "release B visible");
             require(Updater.hash(official).equals(hashA), "check changed A");
             clickDialog("Update", "02-pack-update-preview");
-            // The manifest is signed and published, but its SHA-512 object is unavailable.
-            await(() -> containsLog(profile, "FAILED"), "failed payload was reported");
+            // The manifest is valid, but the received bytes end before the complete payload.
+            await(() -> containsLog(profile, "FAILED"), "truncated payload was reported");
             require(service.installed(profile).version().equals(OLD) && Updater.hash(official).equals(hashA), "failed update changed A");
             await(() -> ui(() -> !app.checking()), "refresh after failure");
             ui(() -> { LauncherUpgradeAgent.capture(app.frame(), evidence.resolve("03-pack-failure.png")); return true; });
@@ -66,7 +66,7 @@ final class PackUpgradeUiTest {
             for (var entry : keep.entrySet()) require(Updater.hash(entry.getKey()).equals(entry.getValue()), "changed " + entry.getKey());
             require(launcherHash.equals(Updater.hash(Path.of(LauncherUpdates.class.getProtectionDomain().getCodeSource().getLocation().toURI()))),
                 "pack updated the launcher");
-            System.out.println("PASS: Pack Home Install, explicit Update, missing payload, retry, Verify files, preserved player files and launcher.");
+            System.out.println("PASS: Pack Home Install, explicit Update, truncated payload, retry, Verify files, preserved player files and launcher.");
         } finally {
             SwingUtilities.invokeAndWait(() -> app.frame().dispose());
         }
@@ -86,7 +86,12 @@ final class PackUpgradeUiTest {
         signer.update(manifest);
         Files.write(payloads.resolve("manifest.json"), manifest);
         Files.write(payloads.resolve("manifest.json.sig"), signer.sign());
-        if (available) Files.copy(jar, payloads.resolve(hash), StandardCopyOption.REPLACE_EXISTING);
+        if (available) {
+            Files.copy(jar, payloads.resolve(hash), StandardCopyOption.REPLACE_EXISTING);
+        } else {
+            byte[] complete = Files.readAllBytes(jar);
+            Files.write(payloads.resolve(hash), Arrays.copyOf(complete, complete.length / 2));
+        }
         return hash;
     }
 
