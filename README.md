@@ -10,7 +10,7 @@ Windows x64 launcher for the official Gunnertimes pack, Minecraft 26.3 and Fabri
 
 | Download | How to run it |
 | --- | --- |
-| [Gunnertimes-Setup.exe](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest/download/Gunnertimes-Setup.exe) | Run the installer and open Gunnertimes from Start or the desktop. Java 25 is included. The installer uses your Windows user account and supports uninstall from Installed apps. |
+| [Gunnertimes-Setup.exe](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest/download/Gunnertimes-Setup.exe) | Run Setup. Gunnertimes opens when installation is complete and is available from Start or the desktop. Java 25 is included. The installer uses your Windows user account and supports uninstall from Installed apps. |
 | [Gunnertimes-Portable.jar](https://github.com/ParsaUltimate/gunnertimes-releases/releases/latest/download/Gunnertimes-Portable.jar) | Install Java 25 x64, put the JAR in a writable folder and run the command below. |
 
 ```powershell
@@ -66,6 +66,7 @@ Launcher updates and pack updates are independent. Gunnertimes checks for launch
 
 ## Troubleshooting
 
+- **Setup failed.** Note the error code shown in Setup. The installation log is under `%LOCALAPPDATA%\Gunnertimes\setup-logs`.
 - **Download failed.** Reconnect and select **Try again**. Already verified files can be reused.
 - **Official mod damaged.** Close Minecraft, go to **Pack → Verify files**, then preview and confirm **Repair**. If the launcher names a conflicting manual mod, back it up and move it outside the profile’s `mods` folder before retrying.
 - **Minecraft did not start or closed.** Select **Open game log** from the progress panel when available. Use **Help → Logs and offline use → Open logs** for launcher and game logs in the active profile.

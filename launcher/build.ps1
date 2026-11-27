@@ -84,12 +84,17 @@ if (!$JarOnly) {
     $oldPath = $env:PATH
     try {
         $env:PATH = "$wix;$oldPath"
-        & "$jdk/bin/jpackage.exe" --type exe --name 'Gunnertimes' --app-version $Version --vendor 'Gunnertimes' `
+        & "$jdk/bin/jpackage.exe" --type msi --name 'Gunnertimes' --app-version $Version --vendor 'Gunnertimes' `
             --app-image "$($stage.FullName)/Gunnertimes" --dest $stage.FullName --install-dir 'Gunnertimes Launcher' `
             --win-per-user-install --win-menu --win-menu-group 'Gunnertimes' --win-shortcut `
             --win-upgrade-uuid 'ec49f39f-8138-4f13-8cd2-ffdc70accc99'
     } finally { $env:PATH = $oldPath }
-    Move-Item -LiteralPath (Join-Path $stage "Gunnertimes-$Version.exe") -Destination (Join-Path $stage 'Gunnertimes-Setup.exe')
-    Write-Output (Join-Path $stage 'Gunnertimes-Setup.exe')
+    $msi = Join-Path $stage "Gunnertimes-$Version.msi"
+    $setup = Join-Path $stage 'Gunnertimes-Setup.exe'
+    $setupSource = Join-Path $PSScriptRoot 'packaging\Setup.cs'
+    $setupIcon = Join-Path $PSScriptRoot 'packaging\gunnertimes.ico'
+    & $csc /nologo /target:winexe /platform:x64 /reference:System.Windows.Forms.dll `
+        "/out:$setup" "/win32icon:$setupIcon" "/resource:$msi,Gunnertimes.msi" $setupSource
+    Write-Output $setup
 }
 Write-Output $portable
